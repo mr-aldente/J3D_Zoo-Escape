@@ -1,0 +1,463 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Zoo Escape - Échappez-vous Ensemble</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Arial', sans-serif;
+            background: linear-gradient(135deg, #0a0a0a 0%, #1a0a2e 100%);
+            color: #ffffff;
+            overflow-x: hidden;
+        }
+
+        /* Navigation */
+        nav {
+            position: fixed;
+            top: 0;
+            width: 100%;
+            background: rgba(0, 0, 0, 0.9);
+            padding: 20px 0;
+            z-index: 1000;
+            border-bottom: 2px solid #00ffff;
+            box-shadow: 0 0 20px rgba(0, 255, 255, 0.3);
+        }
+
+        nav ul {
+            list-style: none;
+            display: flex;
+            justify-content: center;
+            gap: 40px;
+        }
+
+        nav a {
+            color: #00ffff;
+            text-decoration: none;
+            font-size: 1.1em;
+            font-weight: bold;
+            transition: all 0.3s;
+            text-shadow: 0 0 10px #00ffff;
+        }
+
+        nav a:hover {
+            color: #ff00ff;
+            text-shadow: 0 0 20px #ff00ff;
+        }
+
+        /* Hero Section */
+        .hero {
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            text-align: center;
+            padding: 100px 20px 60px;
+            background: 
+                radial-gradient(ellipse at top, rgba(0, 255, 255, 0.15), transparent),
+                radial-gradient(ellipse at bottom, rgba(255, 0, 255, 0.15), transparent);
+        }
+
+        h1 {
+            font-size: 5em;
+            color: #00ffff;
+            text-shadow: 
+                0 0 20px #00ffff, 
+                0 0 40px #00ffff,
+                0 0 60px #00ffff;
+            margin-bottom: 30px;
+            animation: glow 2s ease-in-out infinite alternate;
+            letter-spacing: 8px;
+        }
+
+        @keyframes glow {
+            from {
+                text-shadow: 0 0 20px #00ffff, 0 0 40px #00ffff, 0 0 60px #00ffff;
+            }
+            to {
+                text-shadow: 0 0 30px #ff00ff, 0 0 60px #ff00ff, 0 0 90px #ff00ff;
+            }
+        }
+
+        .tagline {
+            font-size: 1.5em;
+            color: #ff00ff;
+            text-shadow: 0 0 15px #ff00ff;
+            margin-bottom: 20px;
+            max-width: 800px;
+            line-height: 1.6;
+        }
+
+        .pitch {
+            font-size: 1.2em;
+            color: #ffffff;
+            max-width: 900px;
+            line-height: 1.8;
+            margin: 30px auto;
+            padding: 30px;
+            background: rgba(0, 255, 255, 0.05);
+            border: 2px solid rgba(0, 255, 255, 0.3);
+            border-radius: 15px;
+        }
+
+        /* Buttons */
+        .btn-primary {
+            display: inline-block;
+            margin: 40px 15px;
+            padding: 20px 50px;
+            background: linear-gradient(45deg, #00ffff, #ff00ff);
+            color: #000;
+            text-decoration: none;
+            font-weight: bold;
+            font-size: 1.4em;
+            border-radius: 50px;
+            box-shadow: 0 0 30px rgba(0, 255, 255, 0.6);
+            transition: all 0.3s;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+        }
+
+        .btn-primary:hover {
+            transform: scale(1.1);
+            box-shadow: 0 0 50px rgba(255, 0, 255, 0.8);
+        }
+
+        /* Sections */
+        section {
+            padding: 100px 20px;
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        section h2 {
+            font-size: 3em;
+            color: #ffff00;
+            text-align: center;
+            margin-bottom: 60px;
+            text-shadow: 0 0 20px #ffff00;
+        }
+
+        /* Features Grid */
+        .features-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 40px;
+            margin: 60px 0;
+        }
+
+        .feature-card {
+            background: rgba(0, 255, 255, 0.08);
+            border: 2px solid #00ffff;
+            border-radius: 20px;
+            padding: 40px;
+            text-align: center;
+            transition: all 0.3s;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .feature-card::before {
+            content: '';
+            position: absolute;
+            top: -50%;
+            left: -50%;
+            width: 200%;
+            height: 200%;
+            background: radial-gradient(circle, rgba(0, 255, 255, 0.1), transparent);
+            opacity: 0;
+            transition: opacity 0.5s;
+        }
+
+        .feature-card:hover::before {
+            opacity: 1;
+        }
+
+        .feature-card:hover {
+            background: rgba(255, 0, 255, 0.12);
+            border-color: #ff00ff;
+            transform: translateY(-10px);
+            box-shadow: 0 15px 40px rgba(255, 0, 255, 0.5);
+        }
+
+        .feature-icon {
+            font-size: 4em;
+            margin-bottom: 20px;
+            display: block;
+        }
+
+        .feature-card h3 {
+            color: #ffff00;
+            margin-bottom: 20px;
+            font-size: 1.8em;
+            text-shadow: 0 0 10px #ffff00;
+        }
+
+        .feature-card p {
+            line-height: 1.8;
+            color: #cccccc;
+        }
+
+        /* Controls Section */
+        .controls-list {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 30px;
+            margin-top: 40px;
+        }
+
+        .control-item {
+            background: rgba(255, 0, 255, 0.1);
+            border: 2px solid #ff00ff;
+            padding: 25px;
+            border-radius: 15px;
+            text-align: center;
+        }
+
+        .control-item strong {
+            color: #00ffff;
+            font-size: 1.3em;
+            display: block;
+            margin-bottom: 10px;
+        }
+
+        /* Team Section */
+        .team-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 40px;
+            margin-top: 60px;
+        }
+
+        .team-member {
+            background: linear-gradient(135deg, rgba(0, 255, 255, 0.1), rgba(255, 0, 255, 0.1));
+            border: 2px solid #00ffff;
+            border-radius: 20px;
+            padding: 40px 30px;
+            text-align: center;
+            transition: all 0.3s;
+        }
+
+        .team-member:hover {
+            transform: scale(1.05);
+            border-color: #ff00ff;
+            box-shadow: 0 0 30px rgba(255, 0, 255, 0.5);
+        }
+
+        .team-member h3 {
+            color: #ffff00;
+            font-size: 1.8em;
+            margin-bottom: 15px;
+            text-shadow: 0 0 10px #ffff00;
+        }
+
+        .team-member .role {
+            color: #00ffff;
+            font-size: 1.1em;
+            line-height: 1.6;
+        }
+
+        /* Footer */
+        footer {
+            text-align: center;
+            padding: 40px 20px;
+            background: rgba(0, 0, 0, 0.8);
+            border-top: 2px solid #00ffff;
+            margin-top: 100px;
+        }
+
+        footer p {
+            color: #00ffff;
+        }
+
+        /* Download Section */
+        .download-box {
+            background: rgba(0, 0, 0, 0.6);
+            border: 3px solid #00ffff;
+            border-radius: 20px;
+            padding: 60px;
+            text-align: center;
+            box-shadow: 0 0 40px rgba(0, 255, 255, 0.3);
+            margin: 60px auto;
+            max-width: 800px;
+        }
+
+        .download-box h3 {
+            color: #ffff00;
+            font-size: 2em;
+            margin-bottom: 20px;
+            text-shadow: 0 0 15px #ffff00;
+        }
+
+        .download-box p {
+            font-size: 1.2em;
+            margin-bottom: 30px;
+            color: #cccccc;
+        }
+
+        /* Responsive */
+        @media (max-width: 768px) {
+            h1 {
+                font-size: 3em;
+            }
+            
+            nav ul {
+                flex-direction: column;
+                gap: 20px;
+            }
+            
+            .btn-primary {
+                font-size: 1.2em;
+                padding: 15px 35px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <!-- Navigation -->
+    <nav>
+        <ul>
+            <li><a href="#accueil">🏠 Accueil</a></li>
+            <li><a href="#telechargement">⬇️ Télécharger</a></li>
+            <li><a href="#regles">📖 Règles</a></li>
+            <li><a href="#equipe">👥 Équipe</a></li>
+        </ul>
+    </nav>
+
+    <!-- Hero Section -->
+    <section id="accueil" class="hero">
+        <h1>ZOO ESCAPE</h1>
+        <p class="tagline">Échappez-vous Ensemble ou Mourrez Ensemble</p>
+        <div class="pitch">
+            Un jeu coopératif où deux animaux cherchent à s'échapper du zoo ensemble, faisant de la communication la clé de la réussite. Ils partagent la même barre de vie et devront courir à travers les différents enclos, affrontant obstacles et gardiens pour atteindre la sortie.
+        </div>
+        <a href="#telechargement" class="btn-primary">⬇️ Télécharger Maintenant</a>
+    </section>
+
+    <!-- Features -->
+    <section>
+        <h2>✨ Caractéristiques</h2>
+        <div class="features-grid">
+            <div class="feature-card">
+                <span class="feature-icon">🤝</span>
+                <h3>Coopération Totale</h3>
+                <p>Deux joueurs, une barre de vie partagée. Chaque action de votre partenaire vous affecte directement. Communiquez ou périssez !</p>
+            </div>
+            <div class="feature-card">
+                <span class="feature-icon">🌐</span>
+                <h3>Multijoueur En Ligne</h3>
+                <p>Connectez-vous avec un ami via internet. Jouez ensemble peu importe où vous êtes.</p>
+            </div>
+            <div class="feature-card">
+                <span class="feature-icon">🦁</span>
+                <h3>Animaux Uniques</h3>
+                <p>Incarnez deux animaux du zoo avec des capacités complémentaires pour traverser les enclos.</p>
+            </div>
+            <div class="feature-card">
+                <span class="feature-icon">🤖</span>
+                <h3>IA Avancée</h3>
+                <p>Affrontez des gardiens dotés d'une intelligence artificielle qui s'adapte à votre style de jeu.</p>
+            </div>
+            <div class="feature-card">
+                <span class="feature-icon">⚡</span>
+                <h3>Vitesse Progressive</h3>
+                <p>Le jeu accélère au fil du temps, testant vos réflexes et votre coordination.</p>
+            </div>
+            <div class="feature-card">
+                <span class="feature-icon">👹</span>
+                <h3>Boss Épiques</h3>
+                <p>Affrontez des boss redoutables dans des combats mémorables pour progresser.</p>
+            </div>
+        </div>
+    </section>
+
+    <!-- Download Section -->
+    <section id="telechargement">
+        <h2>⬇️ Téléchargement</h2>
+        <div class="download-box">
+            <h3>Prêt à vous échapper ?</h3>
+            <p>Téléchargez Zoo Escape et commencez votre aventure coopérative dès maintenant !</p>
+            <a href="#" class="btn-primary">📦 Télécharger le Jeu</a>
+            <p style="margin-top: 30px; font-size: 0.9em; color: #888;">
+                ⚠️ Connexion Internet requise pour le mode multijoueur<br>
+                💻 Compatible Windows 10/11
+            </p>
+        </div>
+    </section>
+
+    <!-- Rules Section -->
+    <section id="regles">
+        <h2>📖 Comment Jouer</h2>
+        
+        <div style="max-width: 800px; margin: 0 auto;">
+            <div class="feature-card" style="margin-bottom: 40px;">
+                <h3>🎯 Objectif</h3>
+                <p>Traversez tous les enclos du zoo et atteignez la sortie sans perdre toute votre barre de vie commune. Chaque joueur évolue sur sa propre ligne (haut/bas) mais vous partagez la même santé.</p>
+            </div>
+
+            <h3 style="color: #00ffff; text-align: center; font-size: 2em; margin: 40px 0;">🎮 Contrôles</h3>
+            <div class="controls-list">
+                <div class="control-item">
+                    <strong>Sauter</strong>
+                    <p>Évitez les obstacles en sautant par-dessus</p>
+                </div>
+                <div class="control-item">
+                    <strong>Glisser</strong>
+                    <p>Passez sous les obstacles en glissant</p>
+                </div>
+                <div class="control-item">
+                    <strong>Ramasser / Tirer</strong>
+                    <p>Ramassez des objets et tirez sur les ennemis</p>
+                </div>
+            </div>
+
+            <div class="feature-card" style="margin-top: 40px;">
+                <h3>⚠️ Points Importants</h3>
+                <p style="line-height: 2;">
+                    • Vos personnages avancent automatiquement<br>
+                    • La vitesse augmente progressivement<br>
+                    • Vous partagez la même barre de vie<br>
+                    • Communication vocale recommandée<br>
+                    • Gardiens et obstacles à éviter<br>
+                    • Boss à affronter dans certains niveaux
+                </p>
+            </div>
+        </div>
+    </section>
+
+    <!-- Team Section -->
+    <section id="equipe">
+        <h2>👥 L'Équipe</h2>
+        <div class="team-grid">
+            <div class="team-member">
+                <h3>Eliott</h3>
+                <p class="role">Organisateur<br>Développement Web<br>Gestion Réseau</p>
+            </div>
+            <div class="team-member">
+                <h3>Walid</h3>
+                <p class="role">Développeur<br>Gameplay & Mécaniques</p>
+            </div>
+            <div class="team-member">
+                <h3>François</h3>
+                <p class="role">Rédacteur<br>Animations</p>
+            </div>
+            <div class="team-member">
+                <h3>Kristian</h3>
+                <p class="role">Design<br>Audio & Musique</p>
+            </div>
+        </div>
+    </section>
+
+    <!-- Footer -->
+    <footer>
+        <p>🦁 Zoo Escape © 2025 - Projet Scolaire</p>
+        <p style="margin-top: 10px; color: #888;">Développé avec Pygame | Thème par l'équipe</p>
+    </footer>
+</body>
+</html>
