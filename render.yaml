@@ -1,0 +1,11 @@
+# render.yaml (à la racine du repo)
+services:
+  - type: web
+    name: zoo-escape-server
+    env: python
+    region: frankfurt  # Proche de la France
+    buildCommand: pip install -r requirements.txt
+    startCommand: python server/server.py
+    envVars:
+      - key: PORT
+        value: 5555
