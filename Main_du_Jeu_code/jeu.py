@@ -1,20 +1,17 @@
 import random
-
 import pygame
+import os
 
-# Constantes (peuvent être écrasées depuis menu.py)
 LARGEUR = 1024
 HAUTEUR = 768
 FPS = 144
 
-# Couleurs
 BLANC = (255, 255, 255)
 NOIR = (0, 0, 0)
 ROUGE = (255, 80, 80)
 VERT = (80, 240, 130)
 GRIS = (60, 60, 60)
 BLEU_BORD = (48, 97, 228)
-
 
 def creer_fond():
     fond = pygame.Surface((LARGEUR, HAUTEUR))
@@ -32,7 +29,6 @@ def creer_fond():
     pygame.draw.ellipse(fond, (38, 115, 64), (640, HAUTEUR // 2 + 50, LARGEUR // 2, 230))
     return fond
 
-
 def dessiner_bords(ecran):
     pygame.draw.rect(ecran, BLEU_BORD, (0, 0, LARGEUR, 80))
     pygame.draw.rect(ecran, BLEU_BORD, (0, HAUTEUR - 80, LARGEUR, 80))
@@ -41,14 +37,12 @@ def dessiner_bords(ecran):
         pygame.draw.rect(ecran, (80, 132, 255), (x, 63, 20, 17), border_radius=3)
         pygame.draw.rect(ecran, (80, 132, 255), (x, HAUTEUR - 80, 20, 17), border_radius=3)
 
-
 def dessiner_piste(ecran, y_sol, label, couleur):
     pygame.draw.rect(ecran, (46, 130, 78), (0, y_sol + 2, LARGEUR, 55))
     pygame.draw.line(ecran, (35, 60, 35), (0, y_sol + 2), (LARGEUR, y_sol + 2), 5)
     pygame.draw.line(ecran, (210, 230, 180), (0, y_sol), (LARGEUR, y_sol), 2)
     txt = pygame.font.Font(None, 34).render(label, True, couleur)
     ecran.blit(txt, (22, y_sol - 32))
-
 
 class Joueur:
     def __init__(self, x, y_sol, controles, nom, couleurs):
@@ -58,9 +52,9 @@ class Joueur:
         self.couleurs = couleurs
         self.controles = controles
 
-        self.largeur = 48
-        self.hauteur = 66
-        self.hauteur_slide = 36
+        self.largeur = 50
+        self.hauteur = 80
+        self.hauteur_slide = 40
 
         self.y = float(y_sol - self.hauteur)
         self.vy = 0.0
@@ -74,6 +68,60 @@ class Joueur:
         self.etat_descente = False
         self.atterrissage_timer = 0
         self.anim = 0
+
+        self.utilise_sprite = False
+        self.spritesheet = None
+        self.frames = []      
+        self.index_frame = 0  
+        self.animation_timer = 0
+        self.vitesse_animation = 4 
+        self.running_frames = []
+        self.jumping_frames = []
+        self.current_animation = []
+
+        try:
+            dossier_courant = os.path.dirname(__file__)
+            chemin_image = os.path.join(dossier_courant, "assets", "animation.png")
+            
+            if not os.path.exists(chemin_image):
+                 chemin_image = os.path.join(dossier_courant, "assets", "animation.jpg")
+                 
+            self.spritesheet = pygame.image.load(chemin_image).convert_alpha()
+            self.echelle = 0.8  
+            
+            pas_x = 184            
+            pas_y = 293            
+            largeur_decoupe = 180  
+            hauteur_decoupe = 180  
+            offset_x = 50          
+            offset_y = 60          
+            frames_par_ligne = [6, 5, 4, 3]
+            
+            for j in range(len(frames_par_ligne)):
+                for i in range(frames_par_ligne[j]):
+                    x_img = offset_x + (i * pas_x)
+                    y_img = offset_y + (j * pas_y)
+                    
+                    frame_brute = pygame.Surface((largeur_decoupe, hauteur_decoupe), pygame.SRCALPHA)
+                    frame_brute.blit(self.spritesheet, (0, 0), pygame.Rect(x_img, y_img, largeur_decoupe, hauteur_decoupe))
+                    
+                    nv_largeur = int(largeur_decoupe * self.echelle)
+                    nv_hauteur = int(hauteur_decoupe * self.echelle)
+                    frame_agrandie = pygame.transform.scale(frame_brute, (nv_largeur, nv_hauteur))
+                    self.frames.append(frame_agrandie)
+                    
+                    self.frame_largeur_finale = nv_largeur
+                    self.frame_hauteur_finale = nv_hauteur
+                    
+            self.running_frames = list(range(0, 6))       
+            self.jumping_frames = list(range(6, 11))      
+            
+            self.current_animation = self.running_frames
+            self.utilise_sprite = True 
+            
+        except Exception as e:
+            print(f"✗ Erreur animation : {e}")
+            self.utilise_sprite = False
 
     def update(self, touches):
         jump_key, slide_key = self.controles
@@ -113,62 +161,89 @@ class Joueur:
 
         self.anim = (self.anim + 1) % 60
 
+        if self.utilise_sprite and len(self.current_animation) > 0:
+            if self.sur_sol:
+                if self.current_animation != self.running_frames:
+                    self.current_animation = self.running_frames
+                    self.index_frame = 0 
+                    self.animation_timer = 0
+            else:
+                if self.current_animation != self.jumping_frames:
+                    self.current_animation = self.jumping_frames
+                    self.index_frame = 0
+                    self.animation_timer = 0
+                    
+            self.animation_timer += 1
+            if self.animation_timer >= self.vitesse_animation:
+                self.animation_timer = 0
+                self.index_frame += 1
+                if self.index_frame >= len(self.current_animation):
+                    self.index_frame = 0
+
     def get_rect(self):
         h = self.hauteur_slide if self.slide else self.hauteur
         return pygame.Rect(int(self.x), int(self.y), self.largeur, h)
 
     def dessiner(self, ecran):
         rect = self.get_rect()
-        c1, c2 = self.couleurs
-
-        ecrasement = 2 if self.atterrissage_timer > 0 else 0
-
-        pygame.draw.ellipse(ecran, (0, 0, 0), (rect.x + 4, self.y_sol + 4, rect.width - 8, 10))
-        corps_rect = rect.inflate(0, ecrasement)
-        pygame.draw.rect(ecran, c1, corps_rect, border_radius=10)
-        pygame.draw.rect(ecran, (25, 25, 25), rect, width=2, border_radius=10)
-
-        if self.slide:
-            tete_offset = 2
-        elif self.etat_descente:
-            tete_offset = -2
-        elif self.etat_montee:
-            tete_offset = -14
+        
+        if self.utilise_sprite and len(self.frames) > 0:
+            frame_a_dessiner = self.frames[self.current_animation[self.index_frame]]
+            
+            if self.slide:
+                frame_a_dessiner = pygame.transform.scale(frame_a_dessiner, (self.frame_largeur_finale, self.frame_hauteur_finale // 2))
+                y_dessin = self.y - (self.frame_hauteur_finale // 2 - self.hauteur_slide) // 2
+            else:
+                y_dessin = self.y - (self.frame_hauteur_finale - self.hauteur) // 2
+                
+            x_dessin = self.x - (self.frame_largeur_finale - self.largeur) // 2
+            
+            ecran.blit(frame_a_dessiner, (int(x_dessin), int(y_dessin)))
+            
+            txt = pygame.font.Font(None, 28).render(self.nom, True, BLANC)
+            ecran.blit(txt, (rect.x, rect.y - 30))
+            
         else:
-            tete_offset = -10
-
-        tete_y = rect.y + tete_offset
-        pygame.draw.circle(ecran, c2, (rect.centerx, tete_y + 12), 12)
-        pygame.draw.circle(ecran, (25, 25, 25), (rect.centerx, tete_y + 12), 12, 2)
-
-        pygame.draw.circle(ecran, BLANC, (rect.centerx - 4, tete_y + 10), 3)
-        pygame.draw.circle(ecran, BLANC, (rect.centerx + 4, tete_y + 10), 3)
-        pygame.draw.circle(ecran, NOIR, (rect.centerx - 4, tete_y + 10), 1)
-        pygame.draw.circle(ecran, NOIR, (rect.centerx + 4, tete_y + 10), 1)
-
-        if self.etat_descente:
-            offset = 5
-        elif self.etat_montee:
-            offset = -5
-        else:
-            offset = 2 if (self.anim // 10) % 2 == 0 else -2
-
-        pygame.draw.rect(ecran, c2, (rect.x - 5, rect.y + 14 + offset, 8, 14), border_radius=3)
-        pygame.draw.rect(ecran, c2, (rect.right - 3, rect.y + 14 - offset, 8, 14), border_radius=3)
-
-        if self.etat_descente:
-            pygame.draw.line(ecran, BLANC, (rect.centerx - 12, rect.y - 10), (rect.centerx - 12, rect.y + 4), 2)
-            pygame.draw.line(ecran, BLANC, (rect.centerx + 12, rect.y - 10), (rect.centerx + 12, rect.y + 4), 2)
-
-        txt = pygame.font.Font(None, 28).render(self.nom, True, BLANC)
-        ecran.blit(txt, (rect.x - 4, rect.y - 34))
-
+            c1, c2 = self.couleurs
+            ecrasement = 2 if self.atterrissage_timer > 0 else 0
+            pygame.draw.ellipse(ecran, (0, 0, 0), (rect.x + 4, self.y_sol + 4, rect.width - 8, 10))
+            corps_rect = rect.inflate(0, ecrasement)
+            pygame.draw.rect(ecran, c1, corps_rect, border_radius=10)
+            pygame.draw.rect(ecran, (25, 25, 25), rect, width=2, border_radius=10)
+            if self.slide:
+                tete_offset = 2
+            elif self.etat_descente:
+                tete_offset = -2
+            elif self.etat_montee:
+                tete_offset = -14
+            else:
+                tete_offset = -10
+            tete_y = rect.y + tete_offset
+            pygame.draw.circle(ecran, c2, (rect.centerx, tete_y + 12), 12)
+            pygame.draw.circle(ecran, (25, 25, 25), (rect.centerx, tete_y + 12), 12, 2)
+            pygame.draw.circle(ecran, BLANC, (rect.centerx - 4, tete_y + 10), 3)
+            pygame.draw.circle(ecran, BLANC, (rect.centerx + 4, tete_y + 10), 3)
+            pygame.draw.circle(ecran, NOIR, (rect.centerx - 4, tete_y + 10), 1)
+            pygame.draw.circle(ecran, NOIR, (rect.centerx + 4, tete_y + 10), 1)
+            if self.etat_descente:
+                offset = 5
+            elif self.etat_montee:
+                offset = -5
+            else:
+                offset = 2 if (self.anim // 10) % 2 == 0 else -2
+            pygame.draw.rect(ecran, c2, (rect.x - 5, rect.y + 14 + offset, 8, 14), border_radius=3)
+            pygame.draw.rect(ecran, c2, (rect.right - 3, rect.y + 14 - offset, 8, 14), border_radius=3)
+            if self.etat_descente:
+                pygame.draw.line(ecran, BLANC, (rect.centerx - 12, rect.y - 10), (rect.centerx - 12, rect.y + 4), 2)
+                pygame.draw.line(ecran, BLANC, (rect.centerx + 12, rect.y - 10), (rect.centerx + 12, rect.y + 4), 2)
+            txt = pygame.font.Font(None, 28).render(self.nom, True, BLANC)
+            ecran.blit(txt, (rect.x - 4, rect.y - 34))
 
 class Obstacle:
     def __init__(self, x, y_sol, obstacle_type, largeur=70):
         self.x = float(x)
         self.y_sol = y_sol
-        self.type = obstacle_type  # "low" (saut) / "high" (slide)
+        self.type = obstacle_type  
         self.largeur = largeur
 
         if self.type == "low":
@@ -199,7 +274,6 @@ class Obstacle:
             pygame.draw.circle(ecran, leaf_color, (rect.x + 10, rect.centery), 8)
             pygame.draw.circle(ecran, leaf_color, (rect.right - 10, rect.centery), 8)
 
-
 class Circuit:
     def __init__(self, y_sol, longueur_niveau):
         self.y_sol = y_sol
@@ -229,7 +303,6 @@ class Circuit:
         for obs in self.obstacles:
             if -120 < obs.x < LARGEUR + 120:
                 obs.dessiner(ecran, pulse)
-
 
 class JeuDeuxJoueurs:
     def __init__(self):
@@ -300,7 +373,7 @@ class JeuDeuxJoueurs:
         dessiner_bords(ecran)
 
         dessiner_piste(ecran, self.y_sol_j1, "Piste J1 (Z sauter / S glisser)", (255, 190, 170))
-        dessiner_piste(ecran, self.y_sol_j2, "Piste J2 (↑ sauter / ↓ glisser)", (170, 210, 255))
+        dessiner_piste(ecran, self.y_sol_j2, "Piste J2 (HAUT sauter / BAS glisser)", (170, 210, 255))
 
         pulse = int(60 * abs(((self.frame % 40) / 20) - 1))
         self.circuit_j1.dessiner(ecran, pulse)
@@ -342,7 +415,6 @@ class JeuDeuxJoueurs:
             ecran.blit(titre, (LARGEUR // 2 - 180, HAUTEUR // 2 - 90))
             ecran.blit(txt, (LARGEUR // 2 - 360, HAUTEUR // 2 - 28))
             ecran.blit(aide, (LARGEUR // 2 - 180, HAUTEUR // 2 + 26))
-
 
 def lancer_jeu(ecran):
     horloge = pygame.time.Clock()
