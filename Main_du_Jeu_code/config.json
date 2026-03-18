@@ -1,0 +1,8 @@
+{
+  "largeur": 1024,
+  "hauteur": 768,
+  "fps": 144,
+  "volume_musique": 0.31,
+  "volume_sons": 0.7,
+  "vsync": true
+}
