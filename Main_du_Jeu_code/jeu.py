@@ -76,7 +76,7 @@ class Joueur:
         self.frames = []      
         self.index_frame = 0  
         self.animation_timer = 0
-        self.vitesse_animation = 4 
+        self.vitesse_animation = 9 
         self.running_frames = []
         self.jumping_frames = []
         self.current_animation = []
