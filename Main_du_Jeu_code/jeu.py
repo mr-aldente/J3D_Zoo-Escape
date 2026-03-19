@@ -45,12 +45,14 @@ def dessiner_piste(ecran, y_sol, label, couleur):
     ecran.blit(txt, (22, y_sol - 32))
 
 class Joueur:
-    def __init__(self, x, y_sol, controles, nom, couleurs):
+    # On ajoute "type_animal" pour savoir si c'est le renard ou le raton
+    def __init__(self, x, y_sol, controles, nom, couleurs, type_animal="renard"):
         self.x = x
         self.y_sol = y_sol
         self.nom = nom
         self.couleurs = couleurs
         self.controles = controles
+        self.type_animal = type_animal
 
         self.largeur = 50
         self.hauteur = 80
@@ -81,22 +83,32 @@ class Joueur:
 
         try:
             dossier_courant = os.path.dirname(__file__)
-            chemin_image = os.path.join(dossier_courant, "assets", "animation.png")
             
+            # --- CONFIGURATION SELON L'ANIMAL ---
+            if self.type_animal == "renard":
+                nom_fichier = "animation.png"
+                self.echelle = 0.8  
+                pas_x, pas_y = 184, 293            
+                largeur_decoupe, hauteur_decoupe = 180, 180  
+                offset_x, offset_y = 50, 60          
+                frames_par_ligne = [6, 5, 4, 3]
+            else:
+                # --- TES NOUVELLES MESURES POUR LE RATON ! ---
+                nom_fichier = "raton.png" # Pense bien à nommer ton image comme ça
+                self.echelle = 0.8  
+                pas_x, pas_y = 184, 250            
+                largeur_decoupe, hauteur_decoupe = 180, 180  
+                offset_x, offset_y = 54, 74          
+                frames_par_ligne = [6, 5, 5, 4] # Le raton a une ligne de 5 au lieu de 4
+
+            chemin_image = os.path.join(dossier_courant, "assets", nom_fichier)
             if not os.path.exists(chemin_image):
-                 chemin_image = os.path.join(dossier_courant, "assets", "animation.jpg")
+                 # Secours si c'est un .jpg
+                 chemin_image = os.path.join(dossier_courant, "assets", nom_fichier.replace(".png", ".jpg"))
                  
             self.spritesheet = pygame.image.load(chemin_image).convert_alpha()
-            self.echelle = 0.8  
             
-            pas_x = 184            
-            pas_y = 293            
-            largeur_decoupe = 180  
-            hauteur_decoupe = 180  
-            offset_x = 50          
-            offset_y = 60          
-            frames_par_ligne = [6, 5, 4, 3]
-            
+            # Découpage avec la configuration choisie
             for j in range(len(frames_par_ligne)):
                 for i in range(frames_par_ligne[j]):
                     x_img = offset_x + (i * pas_x)
@@ -120,7 +132,7 @@ class Joueur:
             self.utilise_sprite = True 
             
         except Exception as e:
-            print(f"✗ Erreur animation : {e}")
+            print(f"✗ Erreur animation {self.type_animal} : {e}")
             self.utilise_sprite = False
 
     def update(self, touches):
@@ -204,6 +216,7 @@ class Joueur:
             ecran.blit(txt, (rect.x, rect.y - 30))
             
         else:
+            # Code de secours si l'image ne charge pas
             c1, c2 = self.couleurs
             ecrasement = 2 if self.atterrissage_timer > 0 else 0
             pygame.draw.ellipse(ecran, (0, 0, 0), (rect.x + 4, self.y_sol + 4, rect.width - 8, 10))
@@ -309,26 +322,30 @@ class JeuDeuxJoueurs:
         self.fond = creer_fond()
         self.longueur_niveau = 9800
         self.distance = 0.0
-        self.vitesse = 4.1
+        self.vitesse = 2.1
         self.vitesse_max = 6.8
         self.acceleration = 0.0009
 
         self.y_sol_j1 = int(HAUTEUR * 0.48)
         self.y_sol_j2 = int(HAUTEUR * 0.82)
 
+        # JOUEUR 1 : LE RENARD
         self.joueur1 = Joueur(
             x=220,
             y_sol=self.y_sol_j1,
             controles=(pygame.K_z, pygame.K_s),
             nom="J1",
             couleurs=((225, 120, 90), (255, 170, 140)),
+            type_animal="renard"
         )
+        # JOUEUR 2 : LE RATON LAVEUR
         self.joueur2 = Joueur(
             x=220,
             y_sol=self.y_sol_j2,
             controles=(pygame.K_UP, pygame.K_DOWN),
             nom="J2",
             couleurs=((90, 145, 230), (140, 195, 255)),
+            type_animal="raton"
         )
 
         self.circuit_j1 = Circuit(self.y_sol_j1, self.longueur_niveau)
