@@ -38,36 +38,41 @@ NIVEAUX = {
         "gap_min": 300,
         "gap_max": 420,
         "generer_obstacles": False,
+        "ai_j2": True,
     },
-    1: {  # Niveau 1: Facile
+    1: {  # Niveau 1: Facile — calibré pour être finissable confortablement
         "nom": "Level 1 - EASY",
-        "longueur": 9800,
-        "vitesse": 4.1,
-        "vitesse_max": 6.8,
-        "acceleration": 0.0009,
-        "gap_min": 350,
-        "gap_max": 480,
+        "longueur": 8500,
+        "vitesse": 2.8,
+        "vitesse_max": 4.2,
+        "acceleration": 0.0003,
+        "gap_min": 580,
+        "gap_max": 800,
         "generer_obstacles": True,
+        "ai_j2": True,
+        "vies": 5,
     },
     2: {  # Niveau 2: Moyen
         "nom": "Level 2 - MEDIUM",
-        "longueur": 11000,
-        "vitesse": 4.5,
-        "vitesse_max": 7.2,
-        "acceleration": 0.0011,
-        "gap_min": 280,
-        "gap_max": 400,
+        "longueur": 16000,
+        "vitesse": 4.4,
+        "vitesse_max": 7.0,
+        "acceleration": 0.0010,
+        "gap_min": 300,
+        "gap_max": 430,
         "generer_obstacles": True,
+        "ai_j2": True,
     },
     3: {  # Niveau 3: Difficile
         "nom": "Level 3 - HARD",
-        "longueur": 12500,
+        "longueur": 18000,
         "vitesse": 5.0,
-        "vitesse_max": 8.0,
+        "vitesse_max": 8.2,
         "acceleration": 0.0013,
-        "gap_min": 220,
-        "gap_max": 350,
+        "gap_min": 230,
+        "gap_max": 360,
         "generer_obstacles": True,
+        "ai_j2": True,
     },
 }
 
@@ -137,6 +142,19 @@ def police(taille: int) -> pygame.font.Font:
     return _POLICES[taille]
 
 
+# ──────────────────────────────────────────────
+#  FAUX TOUCHES (IA J2)
+# ──────────────────────────────────────────────
+class FauxTouches:
+    """Émule un tableau de touches pygame pour l'IA de J2."""
+    def __init__(self, base, overrides: dict):
+        self._base = base
+        self._overrides = overrides
+
+    def __getitem__(self, key):
+        return self._overrides.get(key, self._base[key])
+
+
 def configurer_audio(volume_sons: float):
     SONS.set_volume(volume_sons)
 
@@ -184,14 +202,18 @@ class PisteSol:
         self.offset_anim += vitesse * 0.25
 
     def dessiner(self, ecran):
-        # Ligne de sol principale (légèrement épaisse)
-        pygame.draw.line(ecran, (100, 200, 100), (0, self.y_sol), (LARGEUR, self.y_sol), 3)
-        
-        # Motif de carrés animé
-        carreau = 48
-        off = int(self.offset_anim) % carreau
-        for x in range(-carreau + off, LARGEUR + carreau, carreau):
-            pygame.draw.line(ecran, (60, 120, 60), (x, self.y_sol - 8), (x, self.y_sol + 8), 1)
+        # Ligne de sol brique (couleur extraite du Background_lvl1)
+        pygame.draw.line(ecran, (60, 38, 22),  (0, self.y_sol),     (LARGEUR, self.y_sol),     4)
+        pygame.draw.line(ecran, (155, 100, 62), (0, self.y_sol + 1), (LARGEUR, self.y_sol + 1), 1)
+        # Motif briques animé
+        bw, bh = 52, 8
+        off = int(self.offset_anim) % bw
+        for row_i in range(2):
+            roff = (bw // 2) * (row_i % 2)
+            ry   = self.y_sol + 2 + row_i * bh
+            for x in range(-bw + off + roff, LARGEUR + bw, bw):
+                pygame.draw.rect(ecran, (115, 74, 44), (max(0, x), ry, bw - 3, bh - 2), border_radius=1)
+                pygame.draw.rect(ecran, (60, 38, 22),  (max(0, x), ry, bw - 3, bh - 2), 1, border_radius=1)
 
 
 # ──────────────────────────────────────────────
@@ -201,32 +223,144 @@ class Skybox:
     def __init__(self):
         self.skybox0 = None
         self.skybox1 = None
+        self.offset_x = 0.0
+        self.coeff_scroll = 0.68
+        self.palette_obstacles_haut = None
+        self.palette_obstacles_bas = None
         self._charger_images()
+
+    @staticmethod
+    def _assombrir(couleur, facteur):
+        return tuple(max(0, min(255, int(c * facteur))) for c in couleur)
+
+    @staticmethod
+    def _eclaircir(couleur, delta):
+        return tuple(max(0, min(255, c + delta)) for c in couleur)
+
+    @staticmethod
+    def _moyenne_couleur(surface, y_ratio=0.82):
+        if surface is None:
+            return (120, 110, 95)
+
+        largeur, hauteur = surface.get_size()
+        if largeur <= 0 or hauteur <= 0:
+            return (120, 110, 95)
+
+        y = max(0, min(hauteur - 1, int(hauteur * y_ratio)))
+        x_min = int(largeur * 0.12)
+        x_max = int(largeur * 0.88)
+        pas = max(1, (x_max - x_min) // 28)
+
+        total_r = total_g = total_b = n = 0
+        for x in range(x_min, x_max, pas):
+            r, g, b, a = surface.get_at((x, y))
+            if a == 0:
+                continue
+            total_r += r
+            total_g += g
+            total_b += b
+            n += 1
+
+        if n == 0:
+            return (120, 110, 95)
+        return (total_r // n, total_g // n, total_b // n)
+
+    def _construire_palette_obstacles(self, image, base_defaut):
+        """
+        Palette accordée au Background_lvl1 (analyse pixel) :
+          – Sol brique/brun : (143, 94, 67)  → obstacles "low"
+          – Pierre/gris     : (127,127,127)  → obstacles "high"
+        La base extraite de l'image affine légèrement ces valeurs.
+        """
+        base = self._moyenne_couleur(image, y_ratio=0.89) if image is not None else base_defaut
+
+        # ── Palette "low" (briques brunes) ────────────────────────────────
+        # On mélange la couleur extraite (~brique) avec le brun de référence
+        brick_ref = (143, 94, 67)
+        low_body  = tuple(int(base[i] * 0.55 + brick_ref[i] * 0.45) for i in range(3))
+        low_out   = self._assombrir(low_body, 0.60)
+        low_det   = self._eclaircir(low_body, 22)
+        low_cap   = self._eclaircir(low_body, 35)
+
+        # ── Palette "high" (pierre grise) ─────────────────────────────────
+        stone_ref = (127, 127, 127)
+        hi_body   = tuple(int(base[i] * 0.30 + stone_ref[i] * 0.70) for i in range(3))
+        hi_out    = self._assombrir(hi_body, 0.52)
+        hi_leaf   = self._eclaircir(hi_body, 30)
+        hi_glow   = self._eclaircir(hi_body, 60)
+
+        return {
+            "low_body":    low_body,
+            "low_outline": low_out,
+            "low_detail":  low_det,
+            "low_cap":     low_cap,
+            "high_body":   hi_body,
+            "high_outline":hi_out,
+            "high_leaf":   hi_leaf,
+            "high_glow":   hi_glow,
+        }
+
+    @staticmethod
+    def _charger_et_redimensionner(chemin):
+        if not os.path.exists(chemin):
+            return None
+        image = pygame.image.load(chemin).convert_alpha()
+        cible_h = max(1, HAUTEUR // 2)
+        ratio = cible_h / max(1, image.get_height())
+        cible_w = max(LARGEUR, int(image.get_width() * ratio))
+        return pygame.transform.smoothscale(image, (cible_w, cible_h))
 
     def _charger_images(self):
         try:
+            chemin_assets = os.path.join(os.path.dirname(__file__), "assets")
+            chemin_lvl1 = os.path.join(chemin_assets, "Background_lvl1.png")
             chemin_base = os.path.join(os.path.dirname(__file__), "assets", "Skybox_0000")
             chemin0 = os.path.join(chemin_base, "skybox0.png")
             chemin1 = os.path.join(chemin_base, "Skybox1.png")
-            
-            if os.path.exists(chemin0):
-                self.skybox0 = pygame.image.load(chemin0)
-                self.skybox0 = pygame.transform.scale(self.skybox0, (LARGEUR, HAUTEUR // 2))
-            
-            if os.path.exists(chemin1):
-                self.skybox1 = pygame.image.load(chemin1)
-                self.skybox1 = pygame.transform.scale(self.skybox1, (LARGEUR, HAUTEUR // 2))
+
+            image_lvl1 = self._charger_et_redimensionner(chemin_lvl1)
+            if image_lvl1 is not None:
+                # Même fond pour les 2 zones (haut/bas), défilement synchronisé
+                self.skybox1 = image_lvl1
+                self.skybox0 = image_lvl1.copy()
+            else:
+                self.skybox0 = self._charger_et_redimensionner(chemin0)
+                self.skybox1 = self._charger_et_redimensionner(chemin1)
+
+            self.palette_obstacles_haut = self._construire_palette_obstacles(self.skybox1, (120, 135, 95))
+            self.palette_obstacles_bas = self._construire_palette_obstacles(self.skybox0, (145, 110, 80))
         except Exception as e:
             print(f"Erreur chargement skybox: {e}")
 
     def update(self, vitesse_jeu):
-        pass
+        self.offset_x += max(0.0, vitesse_jeu) * self.coeff_scroll
+
+    def palettes_obstacles(self):
+        return self.palette_obstacles_haut, self.palette_obstacles_bas
+
+    def _dessiner_couche(self, ecran, image, y):
+        if image is None:
+            return
+        largeur_img = image.get_width()
+        if largeur_img <= 0:
+            return
+
+        off = int(self.offset_x) % largeur_img
+        x = -off
+        while x < LARGEUR:
+            ecran.blit(image, (x, y))
+            x += largeur_img
 
     def dessiner(self, ecran):
-        if self.skybox1:
-            ecran.blit(self.skybox1, (0, 0))
-        if self.skybox0:
-            ecran.blit(self.skybox0, (0, HAUTEUR // 2))
+        if self.skybox1 is None:
+            pygame.draw.rect(ecran, (145, 205, 255), (0, 0, LARGEUR, HAUTEUR // 2))
+        else:
+            self._dessiner_couche(ecran, self.skybox1, 0)
+
+        if self.skybox0 is None:
+            pygame.draw.rect(ecran, (120, 175, 110), (0, HAUTEUR // 2, LARGEUR, HAUTEUR // 2))
+        else:
+            self._dessiner_couche(ecran, self.skybox0, HAUTEUR // 2)
 
 
 # ──────────────────────────────────────────────
@@ -241,13 +375,20 @@ def dessiner_bords(ecran):
 
 
 def dessiner_piste(ecran, y_sol, label, couleur, offset_anim=0):
-    pygame.draw.rect(ecran, (46, 130, 78), (0, y_sol + 2, LARGEUR, 55))
-    pygame.draw.line(ecran, (35, 60, 35),    (0, y_sol + 2), (LARGEUR, y_sol + 2), 5)
-    pygame.draw.line(ecran, (210, 230, 180), (0, y_sol),     (LARGEUR, y_sol),     2)
-    carreau = 48
-    off = int(offset_anim) % carreau
-    for x in range(-carreau + off, LARGEUR + carreau, carreau):
-        pygame.draw.line(ecran, (35, 105, 60), (x, y_sol + 4), (x, y_sol + 54), 1)
+    # Bande de sol en pierre/brique — couleurs extraites du Background_lvl1
+    pygame.draw.rect(ecran, (88, 57, 35),  (0, y_sol + 2, LARGEUR, 55))
+    pygame.draw.line(ecran, (48, 30, 18),  (0, y_sol + 2), (LARGEUR, y_sol + 2), 5)
+    pygame.draw.line(ecran, (165, 108, 68),(0, y_sol),      (LARGEUR, y_sol),     2)
+    # Motif briques animé
+    bw, bh = 52, 14
+    off = int(offset_anim) % bw
+    for row_i, ry in enumerate(range(y_sol + 4, y_sol + 57, bh)):
+        roff = (bw // 2) * (row_i % 2)
+        for x in range(-bw + off + roff, LARGEUR + bw, bw):
+            rect_b = pygame.Rect(max(0, x), ry, min(bw - 3, LARGEUR - max(0, x)), min(bh - 2, y_sol + 57 - ry))
+            if rect_b.width > 2 and rect_b.height > 2:
+                pygame.draw.rect(ecran, (120, 78, 48), rect_b, border_radius=1)
+                pygame.draw.rect(ecran, (55, 34, 20),  rect_b, 1, border_radius=1)
     txt = police(34).render(label, True, couleur)
     ecran.blit(txt, (22, y_sol - 32))
 
@@ -271,12 +412,13 @@ class Joueur:
 
         self.y = float(y_sol - self.hauteur)
         self.vy = 0.0
-        self.gravite = 0.9
-        self.force_saut = -14.5
+        self.gravite = 0.52      # gravité très douce → long temps en l'air
+        self.force_saut = -17.5  # élan initial fort → haute trajectoire
 
         self.sur_sol = True
         self.slide = False
         self.slide_buffer = False
+        self.saut_buffer = 0     # jump-buffer : mémorise le saut en avance
         self.etat_montee = False
         self.etat_descente = False
         self.atterrissage_timer = 0
@@ -634,11 +776,19 @@ class Joueur:
         if slide_appuye and not self.sur_sol:
             self.slide_buffer = True
 
-        if declenche_saut and self.sur_sol and not self.slide and self.cooldown_saut == 0:
+        # Jump buffer : mémorise l'intention de saut pendant 10 frames
+        if declenche_saut and not self.sur_sol:
+            self.saut_buffer = 10
+        if self.saut_buffer > 0:
+            self.saut_buffer -= 1
+
+        # Saut normal OU via buffer à l'atterrissage
+        if (declenche_saut or self.saut_buffer > 0) and self.sur_sol and not self.slide and self.cooldown_saut == 0:
             self.vy = self.force_saut
             self.sur_sol = False
             self.vient_de_sauter = True
-            self.cooldown_saut = 12
+            self.cooldown_saut = 8
+            self.saut_buffer = 0
 
         vouloir_slide = slide_appuye or self.slide_buffer
         if self.sur_sol:
@@ -843,92 +993,265 @@ class Joueur:
 #  OBSTACLES
 # ──────────────────────────────────────────────
 class Obstacle:
-    def __init__(self, x, y_sol, obstacle_type, largeur=70):
-        self.x = float(x)
-        self.y_sol = y_sol
-        self.type = obstacle_type
+    """
+    Obstacles redessinés pour coller au Background_lvl1.png.
+    Couleurs tirées de l'analyse du background :
+      - Brique/brun  : (143, 94, 67)  → obstacles "low" (sauter par-dessus)
+      - Pierre/gris  : (127, 127, 127) → obstacles "high" (se baisser en dessous)
+    Sous-types visuels :
+      low  → "crate" (caisse en bois), "barrel" (tonneau), "wall" (mur de briques)
+      high → "stalactite" (roche suspendue), "beam" (poutre avec chaîne)
+    """
+    _LOW_SUBTYPES  = ("crate", "barrel", "wall")
+    _HIGH_SUBTYPES = ("stalactite", "beam")
+
+    def __init__(self, x, y_sol, obstacle_type, largeur=70, obstacle_palette=None):
+        self.x       = float(x)
+        self.y_sol   = y_sol
+        self.type    = obstacle_type
         self.largeur = largeur
 
+        # Palette accordée au Background_lvl1 (briques + pierre grise)
+        self.palette = obstacle_palette or {
+            "low_body":    (143, 94,  67),
+            "low_outline": (90,  55,  28),
+            "low_detail":  (175, 118, 80),
+            "low_cap":     (185, 125, 75),
+            "high_body":   (118, 118, 118),
+            "high_outline":(68,  68,  68),
+            "high_leaf":   (148, 148, 148),
+            "high_glow":   (210, 210, 210),
+        }
+
         if self.type == "low":
-            self.hauteur = random.randint(58, 84)
-            self.y = y_sol - self.hauteur
+            self.hauteur = random.randint(44, 62)   # plus facile à sauter
+            self.y       = y_sol - self.hauteur
+            self.subtype = random.choice(self._LOW_SUBTYPES)
         else:
-            self.hauteur = random.randint(24, 34)
-            self.y = y_sol - random.randint(86, 106)
+            self.hauteur = random.randint(18, 26)   # poutre fine
+            self.y       = y_sol - random.randint(72, 82)  # assez haut pour forcer le slide
+            self.subtype = random.choice(self._HIGH_SUBTYPES)
 
         self.anim = random.randint(0, 120)
 
     def deplacer(self, vitesse):
-        self.x -= vitesse
+        self.x   -= vitesse
         self.anim = (self.anim + 1) % 120
 
     def get_rect(self):
         return pygame.Rect(int(self.x), int(self.y), self.largeur, self.hauteur)
 
+    # ─── helpers palette ───────────────────────────────────────────────────────
+    def _pal(self, key, default):
+        return self.palette.get(key, default)
+
+    # ─── visuel ────────────────────────────────────────────────────────────────
     def dessiner(self, ecran, pulse=0):
-        rect = self.get_rect()
+        rect      = self.get_rect()
+        low_body  = self._pal("low_body",    (143, 94, 67))
+        low_out   = self._pal("low_outline", (90, 55, 28))
+        low_det   = self._pal("low_detail",  (175, 118, 80))
+        low_cap   = self._pal("low_cap",     (185, 125, 75))
+        hi_body   = self._pal("high_body",   (118, 118, 118))
+        hi_out    = self._pal("high_outline",(68, 68, 68))
+        hi_glow   = self._pal("high_glow",   (210, 210, 210))
+
         if self.type == "low":
-            pygame.draw.rect(ecran, (128, 85, 48),  rect, border_radius=6)
-            pygame.draw.rect(ecran, (79,  51, 28),  rect, width=2, border_radius=6)
-            for i in range(rect.y + 8, rect.bottom, 10):
-                pygame.draw.line(ecran, (153, 105, 62),
-                                 (rect.x + 6, i), (rect.right - 6, i), 1)
-            # Chapeau du tronc
-            pygame.draw.ellipse(ecran, (160, 110, 60),
-                                (rect.x + 4, rect.y - 5, rect.width - 8, 12))
-            pygame.draw.ellipse(ecran, (79, 51, 28),
-                                (rect.x + 4, rect.y - 5, rect.width - 8, 12), 2)
-        else:
-            sway = math.sin(self.anim * 0.08) * 3
-            bx = int(rect.x + sway)
-            pygame.draw.rect(ecran, (88, 106, 68),
-                             (bx, rect.y, rect.width, rect.height), border_radius=6)
-            pygame.draw.rect(ecran, (52, 66,  42),
-                             (bx, rect.y, rect.width, rect.height), width=2, border_radius=6)
-            leaf_c = (70, min(255, 150 + pulse // 3), 75)
-            for lx, ly in [
-                (bx + 10,              rect.centery - 4),
-                (bx + rect.width - 10, rect.centery - 4),
-                (bx + rect.width // 2, rect.y - 6),
-            ]:
-                pygame.draw.circle(ecran, leaf_c, (lx, ly), 10)
-            if self.anim % 30 < 15:
-                pygame.draw.circle(ecran, (255, 230, 80),
-                                   (bx + rect.width // 2, rect.y - 8), 5)
+            # ── Ombre portée ──
+            pygame.draw.ellipse(ecran, (0, 0, 0),
+                                (rect.x + 6, self.y_sol + 3, rect.width - 12, 9))
+
+            if self.subtype == "barrel":
+                # Tonneau brun avec cerclages métalliques
+                pygame.draw.rect(ecran, low_body,  rect, border_radius=10)
+                pygame.draw.rect(ecran, low_out,   rect, 2, border_radius=10)
+                # Cerclages horizontaux
+                for yi in (0.25, 0.50, 0.75):
+                    y_b = int(rect.y + rect.height * yi)
+                    pygame.draw.rect(ecran, (80, 80, 80),
+                                     (rect.x - 2, y_b - 3, rect.width + 4, 6), border_radius=3)
+                    pygame.draw.rect(ecran, (140, 140, 140),
+                                     (rect.x - 2, y_b - 3, rect.width + 4, 6), 1, border_radius=3)
+                # Bouchon du dessus
+                pygame.draw.ellipse(ecran, low_cap,
+                                    (rect.x + 4, rect.y - 6, rect.width - 8, 13))
+                pygame.draw.ellipse(ecran, low_out,
+                                    (rect.x + 4, rect.y - 6, rect.width - 8, 13), 2)
+
+            elif self.subtype == "crate":
+                # Caisse en bois avec croix
+                pygame.draw.rect(ecran, low_body, rect, border_radius=4)
+                pygame.draw.rect(ecran, low_out,  rect, 2, border_radius=4)
+                pygame.draw.line(ecran, low_out, rect.topleft,    rect.bottomright, 2)
+                pygame.draw.line(ecran, low_out, rect.topright,   rect.bottomleft,  2)
+                # Reflet haut-gauche
+                pygame.draw.line(ecran, low_det,
+                                 (rect.x + 3, rect.y + 3), (rect.right - 4, rect.y + 3), 1)
+                pygame.draw.line(ecran, low_det,
+                                 (rect.x + 3, rect.y + 3), (rect.x + 3, rect.bottom - 4), 1)
+
+            else:  # wall — mur de briques
+                pygame.draw.rect(ecran, low_body, rect, border_radius=3)
+                pygame.draw.rect(ecran, low_out,  rect, 2, border_radius=3)
+                bw, bh = 20, 12
+                for ri, by in enumerate(range(rect.y, rect.bottom, bh)):
+                    roff = (bw // 2) * (ri % 2)
+                    for bx in range(rect.x - roff, rect.right + bw, bw):
+                        bx0 = max(rect.x, bx)
+                        bw0 = min(rect.right, bx + bw - 2) - bx0
+                        bh0 = min(bh - 2, rect.bottom - by)
+                        if bw0 > 1 and bh0 > 1:
+                            pygame.draw.rect(ecran, low_out, (bx0, by, bw0, bh0), 1)
+                # Reflet léger sur la rangée du haut
+                pygame.draw.line(ecran, low_det,
+                                 (rect.x + 3, rect.y + 3), (rect.right - 3, rect.y + 3), 1)
+
+        else:  # ── Obstacles en hauteur ──────────────────────────────────────
+            sway = math.sin(self.anim * 0.07) * 3
+            bx   = int(rect.x + sway)
+
+            if self.subtype == "stalactite":
+                # Stalactite en pierre qui dépasse du plafond
+                w = rect.width
+                h = rect.height
+                pts = [
+                    (bx,          rect.y),
+                    (bx + w,      rect.y),
+                    (bx + w * 3 // 4, rect.y + h // 2),
+                    (bx + w // 2, rect.y + h),        # pointe
+                    (bx + w // 4, rect.y + h // 2),
+                ]
+                pygame.draw.polygon(ecran, hi_body,  pts)
+                pygame.draw.polygon(ecran, hi_out,   pts, 2)
+                # Reflet
+                pygame.draw.line(ecran, hi_glow,
+                                 (bx + 4, rect.y + 5),
+                                 (bx + w // 2 - 3, rect.y + h - 8), 2)
+                # Goutte
+                if self.anim % 40 < 20:
+                    pygame.draw.circle(ecran, (140, 200, 240),
+                                       (bx + w // 2, rect.bottom + 6), 4)
+
+            else:  # beam — poutre suspendue par une chaîne
+                # Chaîne
+                cx_ = bx + rect.width // 2
+                for cy_ in range(rect.y - 28, rect.y, 8):
+                    pygame.draw.ellipse(ecran, hi_out, (cx_ - 4, cy_, 8, 6), 2)
+                # Poutre
+                pygame.draw.rect(ecran, hi_body,
+                                 (bx, rect.y, rect.width, rect.height), border_radius=5)
+                pygame.draw.rect(ecran, hi_out,
+                                 (bx, rect.y, rect.width, rect.height), 2, border_radius=5)
+                # Striures de bois
+                for si in range(3):
+                    lx_ = bx + 6 + si * (rect.width - 12) // 3
+                    pygame.draw.line(ecran, hi_out,
+                                     (lx_, rect.y + 3), (lx_, rect.bottom - 3), 1)
+                # Pointes en bas
+                for si in range(3):
+                    spx = bx + 8 + si * (rect.width - 16) // 3
+                    pygame.draw.polygon(ecran, hi_out, [
+                        (spx, rect.bottom),
+                        (spx + 7, rect.bottom),
+                        (spx + 3, rect.bottom + 10),
+                    ])
+
+
+# ──────────────────────────────────────────────
+#  PIÈCE COLLECTIBLE
+# ──────────────────────────────────────────────
+class Piece:
+    """Pièce dorée collectible qui donne des points bonus."""
+    __slots__ = ("x", "y", "rayon", "anim", "collectee")
+
+    def __init__(self, x, y):
+        self.x        = float(x)
+        self.y        = float(y)
+        self.rayon    = 9
+        self.anim     = random.randint(0, 62)
+        self.collectee = False
+
+    def deplacer(self, vitesse):
+        self.x   -= vitesse
+        self.anim = (self.anim + 1) % 62
+
+    def get_rect(self):
+        r = self.rayon
+        return pygame.Rect(int(self.x) - r, int(self.y) - r, r * 2, r * 2)
+
+    def dessiner(self, ecran):
+        if self.collectee:
+            return
+        bob = int(math.sin(self.anim * 0.10) * 4)
+        cx, cy, r = int(self.x), int(self.y) + bob, self.rayon
+        # Ombre légère
+        surf_omb = pygame.Surface((r * 4, 8), pygame.SRCALPHA)
+        pygame.draw.ellipse(surf_omb, (0, 0, 0, 60), surf_omb.get_rect())
+        ecran.blit(surf_omb, (cx - r * 2, cy + r + 2))
+        # Corps doré
+        pygame.draw.circle(ecran, (255, 215, 0),   (cx, cy), r)
+        pygame.draw.circle(ecran, (200, 155, 0),   (cx, cy), r, 2)
+        # Reflet
+        pygame.draw.circle(ecran, (255, 245, 160), (cx - 2, cy - 3), r // 3)
+        # Symbole "$" / signe coin
+        txt = pygame.font.Font(None, 16).render("$", True, (160, 120, 0))
+        ecran.blit(txt, txt.get_rect(center=(cx, cy)))
 
 
 # ──────────────────────────────────────────────
 #  CIRCUIT
 # ──────────────────────────────────────────────
 class Circuit:
-    def __init__(self, y_sol, longueur_niveau, gap_min=300, gap_max=420, generer_obstacles=True):
-        self.y_sol = y_sol
-        self.longueur_niveau = longueur_niveau
-        self.gap_min = gap_min
-        self.gap_max = gap_max
+    def __init__(self, y_sol, longueur_niveau, gap_min=300, gap_max=420, generer_obstacles=True,
+                 obstacle_palette=None):
+        self.y_sol             = y_sol
+        self.longueur_niveau   = longueur_niveau
+        self.gap_min           = gap_min
+        self.gap_max           = gap_max
         self.generer_obstacles = generer_obstacles
+        self.obstacle_palette  = obstacle_palette
         self.obstacles: list[Obstacle] = []
+        self.pieces:    list[Piece]    = []
         if self.generer_obstacles:
             self._generer()
 
     def _generer(self):
-        x = 920
+        x         = 920
         last_type = "low"
-        while x < self.longueur_niveau + 1400:
+        # ── Obstacles ────────────────────────────────────────────────────────
+        while x < self.longueur_niveau + 1600:
+            # Alterner régulièrement ; 28 % de chance de répétition
             if random.random() < 0.72:
                 obstacle_type = "high" if last_type == "low" else "low"
             else:
                 obstacle_type = last_type
-            largeur = random.randint(58, 82)
-            self.obstacles.append(Obstacle(x, self.y_sol, obstacle_type, largeur))
+            largeur = random.randint(56, 84)
+            self.obstacles.append(
+                Obstacle(x, self.y_sol, obstacle_type, largeur, self.obstacle_palette)
+            )
             last_type = obstacle_type
             x += random.randint(self.gap_min, self.gap_max)
+
+        # ── Pièces (arcs entre obstacles) ────────────────────────────────────
+        for obs in self.obstacles:
+            count = random.randint(2, 5)
+            for i in range(count):
+                px = obs.x - 120 - i * 28
+                # hauteur : un peu au-dessus du sol, accessible en courant/sautant
+                py = self.y_sol - random.randint(35, 80)
+                self.pieces.append(Piece(px, py))
 
     def update(self, vitesse):
         for obs in self.obstacles:
             obs.deplacer(vitesse)
+        for piece in self.pieces:
+            if not piece.collectee:
+                piece.deplacer(vitesse)
 
     def dessiner(self, ecran, pulse):
+        for piece in self.pieces:
+            if not piece.collectee and -30 < piece.x < LARGEUR + 30:
+                piece.dessiner(ecran)
         for obs in self.obstacles:
             if -120 < obs.x < LARGEUR + 120:
                 obs.dessiner(ecran, pulse)
@@ -938,7 +1261,7 @@ class Circuit:
 #  HUD
 # ──────────────────────────────────────────────
 def dessiner_hud(ecran, j1, j2, distance, longueur_niveau, vitesse, vitesse_max,
-                 nom_niveau, compte_a_rebours):
+                 nom_niveau, compte_a_rebours, score_pieces=0):
     progression = min(1.0, distance / longueur_niveau)
     score       = int(distance / 10)
     ratio_v     = min(1.0, vitesse / vitesse_max)
@@ -986,10 +1309,15 @@ def dessiner_hud(ecran, j1, j2, distance, longueur_niveau, vitesse, vitesse_max,
     pygame.draw.rect(ecran, fill_col, (S2_X, by_p, max(5, int(BAR_W * progression)), BAR_H), border_radius=5)
     pygame.draw.rect(ecran, (95, 115, 155), (S2_X, by_p, BAR_W, BAR_H), width=1, border_radius=5)
 
-    # Score
+    # Score + pièces
     ecran.blit(police(15).render("SCORE", True, COL_LABEL), (S2_X, PAD + 48))
     score_str = f"{score:,}".replace(",", " ")
     ecran.blit(police(27).render(score_str, True, JAUNE), (S2_X, PAD + 62))
+    # Icône pièce + compteur
+    pygame.draw.circle(ecran, (255, 215, 0), (S2_X + BAR_W - 22, PAD + 72), 7)
+    pygame.draw.circle(ecran, (200, 155, 0), (S2_X + BAR_W - 22, PAD + 72), 7, 2)
+    ecran.blit(police(20).render(f"x{score_pieces}", True, (255, 215, 0)),
+               (S2_X + BAR_W - 11, PAD + 66))
 
     # Separateur 2
     SEP2 = SEP1 + 240
@@ -1026,10 +1354,13 @@ def dessiner_hud(ecran, j1, j2, distance, longueur_niveau, vitesse, vitesse_max,
 #  ÉCRAN DE FIN ANIMÉ
 # ──────────────────────────────────────────────
 class EcranFin:
-    def __init__(self, victoire: bool, nom_niveau: str):
-        self.victoire   = victoire
-        self.nom_niveau = nom_niveau
-        self.frame      = 0
+    def __init__(self, victoire: bool, nom_niveau: str, score_pieces: int = 0,
+                 score_distance: int = 0):
+        self.victoire       = victoire
+        self.nom_niveau     = nom_niveau
+        self.score_pieces   = score_pieces
+        self.score_distance = score_distance
+        self.frame          = 0
         self.particules: list[Particule] = []
         self.image_perdu = None
         if not self.victoire:
@@ -1078,29 +1409,46 @@ class EcranFin:
             rect_lost = self.image_perdu.get_rect(center=(LARGEUR // 2, HAUTEUR // 2 - 190))
             ecran.blit(self.image_perdu, rect_lost)
 
-        bob = int(math.sin(self.frame * 0.08) * 8)
+        bob      = int(math.sin(self.frame * 0.08) * 8)
         titre_txt = "VICTOIRE !" if self.victoire else "GAME OVER"
         titre_col = VERT         if self.victoire else ROUGE
-        sous_txt  = ("Les deux joueurs ont survécu jusqu'au bout !"
-                     if self.victoire else "Un joueur a perdu toutes ses vies.")
 
-        # Ombre + titre animé
+        # ── Ombre + titre animé ──────────────────────────────────────────────
         ombre = police(100).render(titre_txt, True, NOIR)
-        ecran.blit(ombre, ombre.get_rect(center=(LARGEUR // 2 + 5, HAUTEUR // 2 - 80 + bob + 5)))
+        ecran.blit(ombre, ombre.get_rect(center=(LARGEUR // 2 + 5, HAUTEUR // 2 - 90 + bob + 5)))
         titre = police(100).render(titre_txt, True, titre_col)
-        ecran.blit(titre, titre.get_rect(center=(LARGEUR // 2, HAUTEUR // 2 - 80 + bob)))
+        ecran.blit(titre, titre.get_rect(center=(LARGEUR // 2, HAUTEUR // 2 - 90 + bob)))
 
+        # ── Niveau ───────────────────────────────────────────────────────────
         ecran.blit(police(30).render(self.nom_niveau, True, CYAN),
                    police(30).render(self.nom_niveau, True, CYAN)
-                   .get_rect(center=(LARGEUR // 2, HAUTEUR // 2 - 10)))
+                   .get_rect(center=(LARGEUR // 2, HAUTEUR // 2 - 18)))
 
-        ecran.blit(police(28).render(sous_txt, True, BLANC),
-                   police(28).render(sous_txt, True, BLANC)
-                   .get_rect(center=(LARGEUR // 2, HAUTEUR // 2 + 40)))
+        # ── Tableau des scores ───────────────────────────────────────────────
+        score_dist = self.score_distance
+        score_tot  = score_dist + self.score_pieces * 50
+        lignes_score = [
+            (f"Distance :  {score_dist:,}".replace(",", " "), BLANC),
+            (f"Pièces   :  {self.score_pieces}  (x50 pts)",    (255, 215, 0)),
+            (f"TOTAL    :  {score_tot:,}".replace(",", " "),   JAUNE),
+        ]
+        for i, (txt, col) in enumerate(lignes_score):
+            s = police(28).render(txt, True, col)
+            ecran.blit(s, s.get_rect(center=(LARGEUR // 2, HAUTEUR // 2 + 20 + i * 34)))
 
+        # ── Message contextuel ───────────────────────────────────────────────
+        if self.victoire:
+            msg = "Bravo ! Les deux joueurs ont franchi la ligne d'arrivée !"
+        else:
+            msg = "Un joueur est tombé — les deux perdent. Appuyez sur R pour recommencer."
+        ecran.blit(police(26).render(msg, True, (200, 200, 200)),
+                   police(26).render(msg, True, (200, 200, 200))
+                   .get_rect(center=(LARGEUR // 2, HAUTEUR // 2 + 122)))
+
+        # ── Blink aide ───────────────────────────────────────────────────────
         if (self.frame // 25) % 2 == 0:
             aide = police(28).render("R = rejouer   |   ESC = retour au menu", True, BLANC)
-            ecran.blit(aide, aide.get_rect(center=(LARGEUR // 2, HAUTEUR // 2 + 90)))
+            ecran.blit(aide, aide.get_rect(center=(LARGEUR // 2, HAUTEUR // 2 + 155)))
 
 
 # ──────────────────────────────────────────────
@@ -1116,14 +1464,16 @@ class JeuDeuxJoueurs:
         self.nom_niveau    = config_niveau.get("nom", "Libre")
 
         self.fond = Skybox()
-        self.longueur_niveau = config_niveau.get("longueur", 9800)
+        self.longueur_niveau = config_niveau.get("longueur", 14000)
         self.distance        = 0.0
-        self.vitesse         = config_niveau.get("vitesse",      4.1)
-        self.vitesse_max     = config_niveau.get("vitesse_max",  6.8)
-        self.acceleration    = config_niveau.get("acceleration", 0.0009)
+        self.vitesse         = config_niveau.get("vitesse",      3.8)
+        self.vitesse_max     = config_niveau.get("vitesse_max",  5.8)
+        self.acceleration    = config_niveau.get("acceleration", 0.0007)
 
-        self.y_sol_j1 = int(HAUTEUR * 0.48)
-        self.y_sol_j2 = int(HAUTEUR * 0.82)
+        # Y-sol calibrés sur la ligne de brique du Background_lvl1
+        # (88-90 % de chaque demi-hauteur = ~342 px / ~726 px)
+        self.y_sol_j1 = int(HAUTEUR * 0.445)
+        self.y_sol_j2 = min(int(HAUTEUR * 0.945), HAUTEUR - 43)
 
         self.joueur1 = Joueur(
             x=220, y_sol=self.y_sol_j1,
@@ -1136,15 +1486,47 @@ class JeuDeuxJoueurs:
             nom="J2", couleurs=((90, 145, 230), (140, 195, 255)),
         )
 
-        gap_min = config_niveau.get("gap_min", 300)
-        gap_max = config_niveau.get("gap_max", 420)
+        # Vies issues de la config du niveau (5 en easy, 3 en hard...)
+        vies_niveau = config_niveau.get("vies", 3)
+        self.joueur1.vies = vies_niveau
+        self.joueur1.VIES_MAX = vies_niveau
+        self.joueur2.vies = vies_niveau
+        self.joueur2.VIES_MAX = vies_niveau
+
+        gap_min           = config_niveau.get("gap_min", 400)
+        gap_max           = config_niveau.get("gap_max", 560)
         generer_obstacles = config_niveau.get("generer_obstacles", True)
-        self.circuit_j1 = Circuit(self.y_sol_j1, self.longueur_niveau, gap_min, gap_max, generer_obstacles)
-        self.circuit_j2 = Circuit(self.y_sol_j2, self.longueur_niveau, gap_min, gap_max, generer_obstacles)
+        palette_j1, palette_j2 = self.fond.palettes_obstacles()
+        self.circuit_j1 = Circuit(
+            self.y_sol_j1, self.longueur_niveau, gap_min, gap_max,
+            generer_obstacles, obstacle_palette=palette_j1,
+        )
+        self.circuit_j2 = Circuit(
+            self.y_sol_j2, self.longueur_niveau, gap_min, gap_max,
+            generer_obstacles, obstacle_palette=palette_j2,
+        )
 
         # Pistes de sol
         self.piste_j1 = PisteSol(self.y_sol_j1)
         self.piste_j2 = PisteSol(self.y_sol_j2)
+
+        # ── IA J2 : activée par défaut → solo-friendly ──────────────────────
+        self.ai_j2          = config_niveau.get("ai_j2", True)
+        self.j2_manuel_detecte = False   # désactive l'IA si J2 appuie sur ses touches
+
+        # ── Score pièces ────────────────────────────────────────────────────
+        self.score_pieces = 0
+
+        # ── Ligne d'arrivée ─────────────────────────────────────────────────
+        # Placée en coordonnées monde : quand distance == longueur_niveau,
+        # elle se trouve à x = longueur_niveau + 220 - longueur_niveau = 220
+        # → pile sous le joueur, comme si on la franchit.
+        self.finish_x = float(self.longueur_niveau + 260)
+
+        # ── Milestones (25 % / 50 % / 75 %) ─────────────────────────────────
+        self._milestones       = {int(self.longueur_niveau * p) for p in (0.25, 0.50, 0.75)}
+        self._milestone_flash  = 0     # frames restantes d'affichage
+        self._milestone_texte  = ""
 
         self.game_over   = False
         self.victoire    = False
@@ -1153,7 +1535,7 @@ class JeuDeuxJoueurs:
         self.offset_piste = 0.0
 
         self.countdown_frames = self.COUNTDOWN_DUREE * FPS
-        self.en_jeu = False
+        self.en_jeu           = False
         self.ecran_fin: EcranFin | None = None
         self.derniere_seconde = self.COUNTDOWN_DUREE
 
@@ -1164,8 +1546,32 @@ class JeuDeuxJoueurs:
     def _terminer(self, victoire: bool):
         self.game_over = not victoire
         self.victoire  = victoire
-        self.ecran_fin = EcranFin(victoire, self.nom_niveau)
+        self.ecran_fin = EcranFin(
+            victoire, self.nom_niveau,
+            score_pieces=self.score_pieces,
+            score_distance=int(self.distance / 10),
+        )
         SONS.play("win" if victoire else "lose")
+
+    # ── IA simple pour J2 ────────────────────────────────────────────────────
+    def _ia_touches_j2(self, touches_reelles):
+        """Génère de fausses touches pour J2 en fonction des obstacles proches."""
+        overrides = {}
+        j2_x = self.joueur2.x
+        obs_proches = [
+            o for o in self.circuit_j2.obstacles
+            if 90 <= o.x - j2_x <= 310
+        ]
+        if obs_proches:
+            obs  = min(obs_proches, key=lambda o: o.x)
+            dist = obs.x - j2_x
+            if obs.type == "low" and dist <= 230 and self.joueur2.sur_sol:
+                overrides[pygame.K_UP]   = True
+                overrides[pygame.K_DOWN] = False
+            elif obs.type == "high" and dist <= 200 and self.joueur2.sur_sol:
+                overrides[pygame.K_DOWN] = True
+                overrides[pygame.K_UP]   = False
+        return FauxTouches(touches_reelles, overrides)
 
     def update(self, touches):
         self.frame += 1
@@ -1184,12 +1590,21 @@ class JeuDeuxJoueurs:
             self.ecran_fin.update()
             return
 
+        # ── Détection jeu manuel J2 ──────────────────────────────────────────
+        if touches[pygame.K_UP] or touches[pygame.K_DOWN]:
+            self.j2_manuel_detecte = True
+
+        # ── Mise à jour joueurs ──────────────────────────────────────────────
         self.joueur1.update(touches)
-        self.joueur2.update(touches)
+        if self.ai_j2 and not self.j2_manuel_detecte:
+            self.joueur2.update(self._ia_touches_j2(touches))
+        else:
+            self.joueur2.update(touches)
 
         if self.joueur1.vient_de_sauter or self.joueur2.vient_de_sauter:
             SONS.play("jump")
 
+        # ── Accélération ────────────────────────────────────────────────────
         if self.vitesse < self.vitesse_max:
             self.vitesse += self.acceleration
 
@@ -1201,12 +1616,29 @@ class JeuDeuxJoueurs:
         self.circuit_j2.update(self.vitesse)
         self.distance += self.vitesse
 
+        # ── Ligne d'arrivée (avance avec les obstacles) ──────────────────────
+        self.finish_x -= self.vitesse
+
+        # ── Particules ──────────────────────────────────────────────────────
         for p in self.particules:
             p.update()
         self.particules = [p for p in self.particules if p.vie > 0]
 
-        # Collisions avec marge de tolérance
-        rect1 = self.joueur1.get_rect().inflate(-8, -8)
+        # ── Milestones ──────────────────────────────────────────────────────
+        dist_int = int(self.distance)
+        for ms in list(self._milestones):
+            if dist_int >= ms:
+                self._milestones.discard(ms)
+                pct = int(ms / self.longueur_niveau * 100)
+                self._milestone_texte = f"{pct}% !"
+                self._milestone_flash = 90
+                SONS.play("countdown")
+
+        if self._milestone_flash > 0:
+            self._milestone_flash -= 1
+
+        # ── Collisions J1 ────────────────────────────────────────────────────
+        rect1 = self.joueur1.get_rect().inflate(-16, -18)
         for obs in self.circuit_j1.obstacles:
             if rect1.colliderect(obs.get_rect()):
                 if self.joueur1.touche():
@@ -1216,7 +1648,8 @@ class JeuDeuxJoueurs:
                         self._terminer(False)
                         return
 
-        rect2 = self.joueur2.get_rect().inflate(-8, -8)
+        # ── Collisions J2 : sa mort = game over pour les deux ──────────────
+        rect2 = self.joueur2.get_rect().inflate(-16, -18)
         for obs in self.circuit_j2.obstacles:
             if rect2.colliderect(obs.get_rect()):
                 if self.joueur2.touche():
@@ -1226,32 +1659,104 @@ class JeuDeuxJoueurs:
                         self._terminer(False)
                         return
 
+        # ── Collecte des pièces ──────────────────────────────────────────────
+        for circuit, joueur in ((self.circuit_j1, self.joueur1),
+                                (self.circuit_j2, self.joueur2)):
+            if not joueur.en_vie:
+                continue
+            jrect = joueur.get_rect()
+            for piece in circuit.pieces:
+                if not piece.collectee and jrect.colliderect(piece.get_rect()):
+                    piece.collectee = True
+                    self.score_pieces += 1
+                    # Petites particules dorées
+                    for _ in range(8):
+                        self.particules.append(
+                            Particule(piece.x, piece.y, (255, 215, 0))
+                        )
+
+        # ── Victoire : J1 atteint la fin ─────────────────────────────────────
         if self.distance >= self.longueur_niveau:
             self._terminer(True)
 
     def _spawn_particules(self, joueur):
         rect = joueur.get_rect()
-        for _ in range(20):
+        for _ in range(22):
             c = random.choice([ROUGE, ORANGE, JAUNE])
             self.particules.append(Particule(rect.centerx, rect.centery, c))
 
+    # ── Dessin ───────────────────────────────────────────────────────────────
     def dessiner(self, ecran):
         self.fond.dessiner(ecran)
 
         pulse = int(60 * abs(((self.frame % 40) / 20) - 1))
         self.circuit_j1.dessiner(ecran, pulse)
         self.circuit_j2.dessiner(ecran, pulse)
-        
+
         # Pistes de sol
         self.piste_j1.dessiner(ecran)
         self.piste_j2.dessiner(ecran)
 
+        # ── Ligne d'arrivée ──────────────────────────────────────────────────
+        if -50 < self.finish_x < LARGEUR + 50:
+            lax = int(self.finish_x)
+            tile = 24
+            for yi in range(0, HAUTEUR, tile):
+                col = BLANC if (yi // tile + (lax // tile)) % 2 == 0 else NOIR
+                pygame.draw.rect(ecran, col, (lax - 15, yi, 30, tile))
+            pygame.draw.rect(ecran, (255, 215, 0), (lax - 16, 0, 32, HAUTEUR), 2)
+            txt_fin = police(38).render("FINISH!", True, (255, 215, 0))
+            ecran.blit(txt_fin, txt_fin.get_rect(center=(lax, HAUTEUR // 2 - 20)))
+
+        # ── Indicateur de zone d'arrivée (dernier 15 %) ──────────────────────
+        if self.distance >= self.longueur_niveau * 0.85 and not self.termine:
+            pct_fin = (self.distance - self.longueur_niveau * 0.85) / (self.longueur_niveau * 0.15)
+            alpha_warn = int(min(1.0, pct_fin) * 180)
+            warn_surf  = pygame.Surface((LARGEUR, HAUTEUR), pygame.SRCALPHA)
+            warn_surf.fill((255, 215, 0, alpha_warn // 8))
+            ecran.blit(warn_surf, (0, 0))
+            txt_near = police(42).render("ARRIVÉE PROCHE !", True, (255, 215, 0))
+            alpha_txt = int(abs(math.sin(self.frame * 0.10)) * 220)
+            txt_near.set_alpha(alpha_txt)
+            ecran.blit(txt_near, txt_near.get_rect(center=(LARGEUR // 2, HAUTEUR // 2 - 70)))
+
+        # ── Sillage de vitesse (traînées horizontales) ────────────────────────
+        if self.vitesse > self.vitesse_max * 0.75 and self.en_jeu and not self.termine:
+            ratio_spd = (self.vitesse - self.vitesse_max * 0.75) / (self.vitesse_max * 0.25)
+            for _ in range(int(ratio_spd * 4)):
+                ly = random.randint(80, HAUTEUR - 80)
+                lx = random.randint(0, int(LARGEUR * 0.6))
+                llen = random.randint(18, 55)
+                alpha_l = random.randint(35, 90)
+                ls = pygame.Surface((llen, 2), pygame.SRCALPHA)
+                ls.fill((255, 255, 255, alpha_l))
+                ecran.blit(ls, (lx, ly))
+
+        # ── Joueurs ──────────────────────────────────────────────────────────
         self.joueur1.dessiner(ecran)
         self.joueur2.dessiner(ecran)
 
+        # ── Particules ──────────────────────────────────────────────────────
         for p in self.particules:
             p.dessiner(ecran)
 
+        # ── Flash milestone ──────────────────────────────────────────────────
+        if self._milestone_flash > 0:
+            a = int((self._milestone_flash / 90) * 200)
+            ms_surf = pygame.Surface((LARGEUR, HAUTEUR), pygame.SRCALPHA)
+            ms_surf.fill((255, 215, 0, a // 6))
+            ecran.blit(ms_surf, (0, 0))
+            ms_txt = police(72).render(self._milestone_texte, True, JAUNE)
+            ms_txt.set_alpha(a)
+            ecran.blit(ms_txt, ms_txt.get_rect(center=(LARGEUR // 2, HAUTEUR // 2 - 50)))
+
+        # ── Danger flash (vie critique) ──────────────────────────────────────
+        if self.joueur1.vies == 1 and self.frame % 20 < 10:
+            danger = pygame.Surface((LARGEUR, HAUTEUR), pygame.SRCALPHA)
+            danger.fill((255, 0, 0, 28))
+            ecran.blit(danger, (0, 0))
+
+        # ── HUD ─────────────────────────────────────────────────────────────
         compte_rebours_affiche = 0
         if not self.en_jeu:
             compte_rebours_affiche = max(1, int(math.ceil(self.countdown_frames / FPS)))
@@ -1259,7 +1764,8 @@ class JeuDeuxJoueurs:
         dessiner_hud(ecran, self.joueur1, self.joueur2,
                      self.distance, self.longueur_niveau,
                      self.vitesse, self.vitesse_max,
-                     self.nom_niveau, compte_rebours_affiche)
+                     self.nom_niveau, compte_rebours_affiche,
+                     self.score_pieces)
 
         if self.ecran_fin:
             self.ecran_fin.dessiner(ecran)

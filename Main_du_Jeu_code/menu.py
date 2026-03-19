@@ -462,10 +462,17 @@ def afficher_selection_niveaux(ecran, largeur, hauteur):
             ax = x_start + total_w + 12
             pygame.draw.polygon(ecran, arr_col, [(ax + 22, arr_y), (ax, arr_y - 14), (ax, arr_y + 14)])
 
-        # ── Instructions
+        # ── Bandeau info solo/coop ─────────────────────────────────────────
+        f_info = pygame.font.SysFont(None, 22)
+        info1 = f_info.render("J1 : Z / S  (sauter / glisser)    |    J2 : ↑ / ↓  ou  IA auto-pilot", True, (130, 200, 255))
+        info2 = f_info.render("Mode SOLO possible : J2 est géré automatiquement par l'IA si vous ne l'activez pas.", True, (180, 180, 180))
+        ecran.blit(info1, info1.get_rect(center=(largeur // 2, hauteur - 60)))
+        ecran.blit(info2, info2.get_rect(center=(largeur // 2, hauteur - 40)))
+
+        # ── Instructions navigation ────────────────────────────────────────
         f_aide = pygame.font.SysFont(None, 26)
         aide = f_aide.render("< >  naviguer     ENTREE / clic  lancer     ESC  retour", True, (120, 130, 150))
-        ecran.blit(aide, aide.get_rect(center=(largeur // 2, hauteur - 34)))
+        ecran.blit(aide, aide.get_rect(center=(largeur // 2, hauteur - 16)))
 
         pygame.display.flip()
 
