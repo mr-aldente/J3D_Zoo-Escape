@@ -1,4 +1,6 @@
 # render.yaml (à la racine du repo)
+# url seveur :  https://j3d-zoo-escape.onrender.com
+# serveur id :  srv-d5ob4htactks73918sog
 services:
   - type: web
     name: zoo-escape-server

@@ -1,3 +1,19 @@
+"""
+jeu.py — Moteur de jeu Zoo Escape
+===================================
+Contient toute la logique du jeu :
+  - Définition des niveaux (NIVEAUX)
+  - Génération procédurale des sons (GestionnaireSons)
+  - Rendu du décor : Skybox, PisteSol, dessiner_bords
+  - Joueur avec animations sprite et physique (saut, slide)
+  - Obstacles et pièces collectibles (Circuit)
+  - IA simple pour le joueur 2 en mode solo (FauxTouches)
+  - HUD et écran de fin (EcranFin)
+  - Boucle principale du jeu (lancer_jeu)
+
+Ce module est importé par menu.py, qui gère l'écran titre et les paramètres.
+"""
+
 import math
 import random
 import os
@@ -6,7 +22,8 @@ from collections import deque
 
 import pygame
 
-# Constantes (peuvent être écrasées depuis menu.py)
+# ── Constantes globales ────────────────────────────────────────────────────────
+# Ces valeurs sont écrasées depuis menu.py selon la résolution choisie.
 LARGEUR = 1024
 HAUTEUR = 768
 FPS = 144
@@ -28,6 +45,17 @@ ROSE       = (255, 20,  147)
 # ──────────────────────────────────────────────
 #  NIVEAUX
 # ──────────────────────────────────────────────
+
+# Chaque niveau est un dict avec les clés suivantes :
+#   nom             : texte affiché dans le HUD
+#   longueur        : distance totale à parcourir (en px monde)
+#   vitesse         : vitesse de défilement initiale (px/frame)
+#   vitesse_max     : vitesse maximale après accélération
+#   acceleration    : augmentation de vitesse par frame
+#   gap_min/gap_max : espacement min/max entre obstacles (px)
+#   generer_obstacles: False → niveau de test sans danger
+#   ai_j2           : True  → J2 est piloté par l'IA si le joueur ne touche pas ses touches
+#   vies            : vies au démarrage (optionnel, défaut=3)
 NIVEAUX = {
     0: {  # Niveau 0: Test animations (sans obstacles)
         "nom": "ANIMATION TEST",
@@ -84,6 +112,13 @@ _VOLUME_EFFETS = 0.7
 
 
 class GestionnaireSons:
+    """
+    Génère tous les effets sonores du jeu de façon procédurale (pas de fichiers .wav).
+    Les sons sont produits par synthèse : on remplit un buffer PCM 16-bit avec
+    des formes d'onde (sinus, carré, triangle) puis on crée un pygame.mixer.Sound.
+
+    Sons disponibles : "jump", "hit", "win", "lose", "countdown"
+    """
     def __init__(self):
         self.actif = pygame.mixer.get_init() is not None
         self.sons = {}
@@ -92,6 +127,8 @@ class GestionnaireSons:
             self.set_volume(_VOLUME_EFFETS)
 
     def _generer_tonalite(self, frequence, duree=0.16, volume=0.35, forme="sine", glide=0.0):
+        # glide : décalage de fréquence total sur toute la durée (glissando).
+        # L'enveloppe multiplie le volume : montée rapide (8 %) puis descente linéaire.
         if not self.actif:
             return None
         sample_rate = 22050
@@ -146,7 +183,13 @@ def police(taille: int) -> pygame.font.Font:
 #  FAUX TOUCHES (IA J2)
 # ──────────────────────────────────────────────
 class FauxTouches:
-    """Émule un tableau de touches pygame pour l'IA de J2."""
+    """
+    Émule le tableau de touches retourné par pygame.key.get_pressed() pour l'IA de J2.
+
+    L'IA construit un dict d'overrides (ex: {K_UP: True}) et le passe ici.
+    Quand le joueur 2 est testé avec `touches[K_UP]`, c'est cette classe qui répond,
+    ce qui permet de simuler une pression de touche sans input réel du clavier.
+    """
     def __init__(self, base, overrides: dict):
         self._base = base
         self._overrides = overrides
@@ -397,14 +440,30 @@ def dessiner_piste(ecran, y_sol, label, couleur, offset_anim=0):
 #  JOUEUR avec ANIMATION SPRITE
 # ──────────────────────────────────────────────
 class Joueur:
+    """
+    Représente un personnage jouable (J1 ou J2).
+
+    Physique :
+      - Gravité constante appliquée chaque frame (vy += gravite)
+      - Saut : impulsion négative instantanée sur vy
+      - Slide : hauteur réduite, durée minimale imposée pour l'animation
+
+    Animations :
+      - Priorité : dossier Fox/ → sprites individuels PNG
+      - Fallback 1 : Running_animation.png + Jumping_animation.png (bandes de frames)
+      - Fallback 2 : animation.png (ancien format spritesheet)
+      - Fallback 3 : rendu géométrique pygame (rectangles + cercles)
+
+    Invincibilité post-coup : 90 frames (~0.6 s à 144 FPS), clignotement visible.
+    """
     VIES_MAX = 3
 
     def __init__(self, x, y_sol, controles, nom, couleurs):
         self.x = float(x)
-        self.y_sol = y_sol
+        self.y_sol = y_sol     # Y du sol pour cette piste (ancre verticale)
         self.nom = nom
         self.couleurs = couleurs
-        self.controles = controles
+        self.controles = controles  # (touche_saut, touche_slide)
 
         self.largeur = 48
         self.hauteur = 66
@@ -444,11 +503,14 @@ class Joueur:
         self.vient_de_sauter = False
         self.jump_sequence_index = 0
 
-        # Anti-spam actions (pour lisibilité des animations)
+        # Anti-spam / cooldowns
+        # cooldown_saut/slide : frames d'attente avant de pouvoir re-déclencher l'action.
+        # saut_appui_precedent / slide_appui_precedent : détection du front montant (edge trigger)
+        # afin de n'activer le saut/slide qu'à la pression initiale, pas au maintien.
         self.cooldown_saut = 0
         self.cooldown_slide = 0
         self.slide_timer = 0
-        self.slide_duree_min = 14
+        self.slide_duree_min = 14      # durée minimale d'un slide (ajustée selon le nb de frames d'anim)
         self.saut_appui_precedent = False
         self.slide_appui_precedent = False
 
@@ -531,6 +593,11 @@ class Joueur:
         return frame
 
     def _supprimer_fond_noir_connecte_bords(self, surface):
+        """
+        Flood-fill depuis les bords de la surface pour rendre transparent
+        tout pixel noir connecté au bord (fond d'image non masqué).
+        Utile quand le sprite n'a pas de canal alpha propre.
+        """
         largeur, hauteur = surface.get_size()
         if largeur <= 0 or hauteur <= 0:
             return
@@ -1202,6 +1269,16 @@ class Piece:
 #  CIRCUIT
 # ──────────────────────────────────────────────
 class Circuit:
+    """
+    Gère les obstacles et les pièces d'une piste (J1 ou J2).
+
+    À la création, _generer() place :
+      - Des obstacles alternant "low" (sauter) et "high" (se baisser),
+        espacés de [gap_min, gap_max] pixels, sur toute la longueur du niveau.
+      - Des pièces en arc devant chaque obstacle (2-5 par obstacle).
+
+    Chaque frame, update(vitesse) fait avancer tous les objets vers la gauche.
+    """
     def __init__(self, y_sol, longueur_niveau, gap_min=300, gap_max=420, generer_obstacles=True,
                  obstacle_palette=None):
         self.y_sol             = y_sol
@@ -1455,9 +1532,28 @@ class EcranFin:
 #  JEU PRINCIPAL
 # ──────────────────────────────────────────────
 class JeuDeuxJoueurs:
+    """
+    Contrôleur principal d'une partie.
+
+    Responsabilités :
+      - Initialiser J1, J2 et leurs circuits respectifs selon la config du niveau
+      - Gérer le compte à rebours de départ
+      - Mettre à jour la physique, les collisions, la collecte de pièces
+      - Piloter l'IA de J2 (mode solo) via FauxTouches
+      - Déclencher la fin de partie (victoire ou game over)
+      - Déléguer le rendu à dessiner()
+
+    Deux pistes indépendantes : J1 dans la moitié haute, J2 dans la moitié basse.
+    La mort de l'un entraîne le game over des deux (coopération obligatoire).
+
+    Paramètres réseau (optionnels) :
+      client_reseau : instance de ClientReseau déjà connectée
+      player_id     : 0 → ce PC contrôle J1, 1 → ce PC contrôle J2
+      seed          : graine random partagée pour synchroniser les obstacles
+    """
     COUNTDOWN_DUREE = 3
 
-    def __init__(self, config_niveau=None):
+    def __init__(self, config_niveau=None, client_reseau=None, player_id=0, seed=None):
         if config_niveau is None:
             config_niveau = {}
         self.config_niveau = config_niveau
@@ -1493,6 +1589,16 @@ class JeuDeuxJoueurs:
         self.joueur2.vies = vies_niveau
         self.joueur2.VIES_MAX = vies_niveau
 
+        # ── Mode réseau ──────────────────────────────────────────────────────
+        # client_reseau : instance de ClientReseau connectée, ou None si local/solo
+        # player_id     : 0 = ce PC joue J1, 1 = ce PC joue J2
+        # En mode réseau on fixe le seed random pour que les deux PCs génèrent
+        # exactement les mêmes obstacles (même séquence aléatoire).
+        self.client_reseau = client_reseau
+        self.player_id     = player_id
+        if seed is not None:
+            random.seed(seed)
+
         gap_min           = config_niveau.get("gap_min", 400)
         gap_max           = config_niveau.get("gap_max", 560)
         generer_obstacles = config_niveau.get("generer_obstacles", True)
@@ -1510,8 +1616,9 @@ class JeuDeuxJoueurs:
         self.piste_j1 = PisteSol(self.y_sol_j1)
         self.piste_j2 = PisteSol(self.y_sol_j2)
 
-        # ── IA J2 : activée par défaut → solo-friendly ──────────────────────
-        self.ai_j2          = config_niveau.get("ai_j2", True)
+        # ── IA J2 : activée uniquement en mode solo ──────────────────────────
+        # En mode réseau, chaque PC contrôle son propre joueur : l'IA est désactivée.
+        self.ai_j2          = config_niveau.get("ai_j2", False) and client_reseau is None
         self.j2_manuel_detecte = False   # désactive l'IA si J2 appuie sur ses touches
 
         # ── Score pièces ────────────────────────────────────────────────────
@@ -1555,7 +1662,18 @@ class JeuDeuxJoueurs:
 
     # ── IA simple pour J2 ────────────────────────────────────────────────────
     def _ia_touches_j2(self, touches_reelles):
-        """Génère de fausses touches pour J2 en fonction des obstacles proches."""
+        """
+        Génère de fausses touches pour J2 en fonction des obstacles proches.
+
+        Algorithme :
+          1. Filtre les obstacles entre 90 et 310 px devant J2.
+          2. Prend le plus proche.
+          3. Si obstacle "low"  (au sol) et à ≤230 px → simule SAUT  (K_UP).
+             Si obstacle "high" (suspendu) et à ≤200 px → simule SLIDE (K_DOWN).
+          4. Retourne un FauxTouches qui surcharge uniquement ces deux touches.
+
+        L'IA est désactivée dès que le vrai joueur 2 appuie sur une touche.
+        """
         overrides = {}
         j2_x = self.joueur2.x
         obs_proches = [
@@ -1588,6 +1706,11 @@ class JeuDeuxJoueurs:
 
         if self.termine:
             self.ecran_fin.update()
+            return
+
+        # ── Mode réseau : échange d'états avec le serveur ───────────────────
+        if self.client_reseau is not None:
+            self._update_reseau(touches)
             return
 
         # ── Détection jeu manuel J2 ──────────────────────────────────────────
@@ -1678,6 +1801,131 @@ class JeuDeuxJoueurs:
         # ── Victoire : J1 atteint la fin ─────────────────────────────────────
         if self.distance >= self.longueur_niveau:
             self._terminer(True)
+
+    # ── Réseau ───────────────────────────────────────────────────────────────
+
+    def _update_reseau(self, touches):
+        """
+        Boucle de mise à jour en mode réseau.
+
+        Principe :
+          - Ce PC contrôle uniquement son joueur local (player_id 0→J1, 1→J2).
+          - La physique du joueur local est calculée normalement (touches clavier).
+          - L'état du joueur local est envoyé au serveur chaque frame.
+          - L'état du joueur distant (reçu du serveur) est appliqué visuellement.
+          - Les deux PCs tournent le même seed random → mêmes obstacles.
+          - Chacun détecte ses propres collisions et victoire de façon indépendante.
+        """
+        joueur_local   = self.joueur1 if self.player_id == 0 else self.joueur2
+        joueur_distant = self.joueur2 if self.player_id == 0 else self.joueur1
+        circuit_local  = self.circuit_j1 if self.player_id == 0 else self.circuit_j2
+
+        # ── Mise à jour du joueur local ──────────────────────────────────────
+        joueur_local.update(touches)
+        if joueur_local.vient_de_sauter:
+            SONS.play("jump")
+
+        # ── Envoie l'état local au serveur ───────────────────────────────────
+        self.client_reseau.envoyer_etat_joueur(joueur_local)
+
+        # ── Reçoit et applique l'état du joueur distant ──────────────────────
+        etat_distant = self.client_reseau.get_etat_joueur_distant()
+        if etat_distant:
+            self._appliquer_etat_reseau(joueur_distant, etat_distant)
+
+        # ── Vérifie les messages spéciaux (déconnexion, game_over serveur) ───
+        etat_jeu = self.client_reseau.get_etat_jeu()
+        if etat_jeu:
+            t = etat_jeu.get('type')
+            if t in ('player_disconnected', 'server_shutdown') and not self.termine:
+                self._terminer(False)
+                return
+
+        # ── Accélération + décor ─────────────────────────────────────────────
+        if self.vitesse < self.vitesse_max:
+            self.vitesse += self.acceleration
+        self.offset_piste += self.vitesse
+        self.fond.update(self.vitesse)
+        self.piste_j1.update(self.vitesse)
+        self.piste_j2.update(self.vitesse)
+        self.circuit_j1.update(self.vitesse)
+        self.circuit_j2.update(self.vitesse)
+        self.distance += self.vitesse
+        self.finish_x -= self.vitesse
+
+        # ── Particules ──────────────────────────────────────────────────────
+        for p in self.particules:
+            p.update()
+        self.particules = [p for p in self.particules if p.vie > 0]
+
+        # ── Milestones ──────────────────────────────────────────────────────
+        dist_int = int(self.distance)
+        for ms in list(self._milestones):
+            if dist_int >= ms:
+                self._milestones.discard(ms)
+                pct = int(ms / self.longueur_niveau * 100)
+                self._milestone_texte = f"{pct}% !"
+                self._milestone_flash = 90
+                SONS.play("countdown")
+        if self._milestone_flash > 0:
+            self._milestone_flash -= 1
+
+        # ── Collisions du joueur local uniquement ────────────────────────────
+        rect_local = joueur_local.get_rect().inflate(-16, -18)
+        for obs in circuit_local.obstacles:
+            if rect_local.colliderect(obs.get_rect()):
+                if joueur_local.touche():
+                    SONS.play("hit")
+                    self._spawn_particules(joueur_local)
+                    if not joueur_local.en_vie:
+                        self._terminer(False)
+                        return
+
+        # ── Collecte des pièces (joueur local seulement) ─────────────────────
+        jrect = joueur_local.get_rect()
+        for piece in circuit_local.pieces:
+            if not piece.collectee and jrect.colliderect(piece.get_rect()):
+                piece.collectee = True
+                self.score_pieces += 1
+                for _ in range(8):
+                    self.particules.append(Particule(piece.x, piece.y, (255, 215, 0)))
+
+        # ── Victoire ────────────────────────────────────────────────────────
+        if self.distance >= self.longueur_niveau:
+            self._terminer(True)
+
+    def _appliquer_etat_reseau(self, joueur, etat: dict):
+        """
+        Applique l'état reçu du réseau sur le joueur distant (visuel uniquement).
+        On met à jour position, vitesse verticale et animation mais on ne
+        recalcule pas la physique — c'est le PC distant qui la gère.
+        """
+        joueur.x      = etat.get('x',          joueur.x)
+        joueur.y      = etat.get('y',          joueur.y)
+        joueur.vy     = etat.get('velocity_y', joueur.vy)
+        joueur.sur_sol = not etat.get('is_jumping', False)
+        joueur.slide   = etat.get('is_sliding', False)
+
+        # Synchronise l'animation avec l'état reçu
+        if joueur.utilise_sprite:
+            anim_state = etat.get('animation_state', 'run')
+            if anim_state == 'slide' and joueur.sliding_frames:
+                if joueur.current_animation is not joueur.sliding_frames:
+                    joueur.current_animation = joueur.sliding_frames
+                    joueur.index_frame = 0
+            elif anim_state == 'jump' and joueur.jumping_frames:
+                if joueur.current_animation is not joueur.jumping_frames:
+                    joueur.current_animation = joueur.jumping_frames
+                    joueur.index_frame = 0
+            else:
+                if joueur.current_animation is not joueur.running_frames:
+                    joueur.current_animation = joueur.running_frames
+                    joueur.index_frame = 0
+            # Avance l'animation côté distant pour qu'elle ne soit pas figée
+            joueur.animation_timer += 1
+            if joueur.animation_timer >= joueur.vitesse_animation:
+                joueur.animation_timer = 0
+                joueur.index_frame = (joueur.index_frame + 1) % max(1, len(joueur.current_animation))
 
     def _spawn_particules(self, joueur):
         rect = joueur.get_rect()
@@ -1774,9 +2022,27 @@ class JeuDeuxJoueurs:
 # ──────────────────────────────────────────────
 #  BOUCLE PRINCIPALE
 # ──────────────────────────────────────────────
-def lancer_jeu(ecran, config_niveau=None):
+def lancer_jeu(ecran, config_niveau=None, client_reseau=None, player_id=0, seed=None):
+    """
+    Boucle principale d'une partie.
+
+    Appelée depuis menu.py après sélection du niveau.
+    Retourne True  si le joueur revient au menu (ESC ou fin de partie).
+    Retourne False si la fenêtre est fermée.
+
+    Paramètres réseau (optionnels, passés depuis menu.py) :
+      client_reseau : ClientReseau connecté, ou None (local/solo)
+      player_id     : 0 = J1, 1 = J2
+      seed          : graine random partagée (synchronise les obstacles en réseau)
+
+    La touche R en fin de partie relance une nouvelle partie
+    (en mode réseau, R n'est pas disponible car il faudrait resynchroniser).
+    """
     horloge = pygame.time.Clock()
-    partie  = JeuDeuxJoueurs(config_niveau)
+    partie  = JeuDeuxJoueurs(config_niveau,
+                             client_reseau=client_reseau,
+                             player_id=player_id,
+                             seed=seed)
 
     while True:
         horloge.tick(FPS)
@@ -1787,7 +2053,8 @@ def lancer_jeu(ecran, config_niveau=None):
             if event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_ESCAPE:
                     return True
-                if partie.termine and event.key == pygame.K_r:
+                # R = rejouer uniquement en mode local/solo
+                if partie.termine and event.key == pygame.K_r and client_reseau is None:
                     return lancer_jeu(ecran, config_niveau)
 
         touches = pygame.key.get_pressed()

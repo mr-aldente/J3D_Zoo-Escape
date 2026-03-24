@@ -1,6 +1,7 @@
 import socket
 import pickle
 import threading
+import random
 from dataclasses import dataclass
 from typing import Dict, Optional
 
@@ -60,8 +61,11 @@ class GameServer:
                 thread.start()
             
             if len(self.clients) == 2:
-                print("[SERVEUR] 2 joueurs connectés ! Partie lancée.")
-                self.broadcast({'type': 'game_start'})
+                # Génère un seed partagé pour que les deux clients aient
+                # exactement les mêmes obstacles (même séquence random).
+                seed = random.randint(0, 2**31)
+                print(f"[SERVEUR] 2 joueurs connectés ! Partie lancée. Seed={seed}")
+                self.broadcast({'type': 'game_start', 'seed': seed})
                 
         except KeyboardInterrupt:
             print("\n[SERVEUR] Arrêt du serveur...")
@@ -185,5 +189,17 @@ class GameServer:
         print("[SERVEUR] Serveur arrêté.")
 
 if __name__ == "__main__":
+    # Affiche l'IP locale pour que l'autre joueur sache où se connecter
+    try:
+        ip_locale = socket.gethostbyname(socket.gethostname())
+    except Exception:
+        ip_locale = "inconnue"
+    print("=" * 45)
+    print("   ZOO ESCAPE — Serveur de jeu")
+    print("=" * 45)
+    print(f"   IP locale    : {ip_locale}")
+    print(f"   Port         : 5555")
+    print(f"   Donne cette IP à l'autre joueur !")
+    print("=" * 45)
     server = GameServer(host='0.0.0.0', port=5555)
     server.start()
