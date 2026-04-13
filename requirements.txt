@@ -1,3 +1,2 @@
-# requirements.txt
-# Aucune dépendance externe nécessaire pour le serveur
-# Python standard library uniquement
+pygame
+opencv-python
