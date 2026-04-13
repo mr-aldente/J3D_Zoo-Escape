@@ -23,7 +23,41 @@ La réception est faite dans un thread séparé pour ne pas bloquer la boucle de
 import socket
 import pickle
 import threading
-from typing import Optional
+import json as _json
+from typing import Optional, List
+
+DISCOVERY_PORT = 5556  # Must match zoo_escape_server.py
+
+
+def scanner_jeux_lan(timeout: float = 2.0) -> List[dict]:
+    """
+    Écoute les beacons UDP émis par le(s) serveur(s) Zoo Escape sur le LAN.
+    Retourne une liste de dicts {'ip': str, 'nom': str, 'port': int} (dédupliqués par IP).
+    """
+    found: dict[str, dict] = {}  # ip → info
+    udp = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    udp.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    try:
+        udp.bind(('', DISCOVERY_PORT))
+        udp.settimeout(0.2)
+        import time
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            try:
+                data, addr = udp.recvfrom(1024)
+                msg = _json.loads(data.decode())
+                if msg.get('type') == 'zoo_escape_server':
+                    ip = msg.get('ip', addr[0])
+                    found[ip] = {'ip': ip, 'nom': msg.get('nom', ip), 'port': msg.get('port', 5555)}
+            except socket.timeout:
+                pass
+            except Exception:
+                pass
+    except Exception as e:
+        print(f"[DISCOVERY] Erreur scanner : {e}")
+    finally:
+        udp.close()
+    return list(found.values())
 
 
 class ClientReseau:

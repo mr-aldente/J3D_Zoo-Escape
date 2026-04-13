@@ -4,7 +4,7 @@ __pycache__/
 *.pyo
 
 # Config locale (résolution, volumes — propre à chaque machine)
-Main_du_Jeu_code/config.json
+src/config.json
 
 # macOS
 .DS_Store
@@ -14,3 +14,6 @@ Main_du_Jeu_code/config.json
 
 # Logs
 *.log
+
+
+

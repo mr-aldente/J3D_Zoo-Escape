@@ -66,6 +66,7 @@ NIVEAUX = {
         "gap_min": 300,
         "gap_max": 420,
         "generer_obstacles": False,
+        "generer_gardes": False,
         "ai_j2": True,
     },
     1: {  # Niveau 1: Facile — calibré pour être finissable confortablement
@@ -77,6 +78,7 @@ NIVEAUX = {
         "gap_min": 580,
         "gap_max": 800,
         "generer_obstacles": True,
+        "generer_gardes": True,
         "ai_j2": True,
         "vies": 5,
     },
@@ -89,6 +91,7 @@ NIVEAUX = {
         "gap_min": 300,
         "gap_max": 430,
         "generer_obstacles": True,
+        "generer_gardes": True,
         "ai_j2": True,
     },
     3: {  # Niveau 3: Difficile
@@ -100,6 +103,31 @@ NIVEAUX = {
         "gap_min": 230,
         "gap_max": 360,
         "generer_obstacles": True,
+        "generer_gardes": True,
+        "ai_j2": True,
+    },
+    4: {  # Niveau 4: Aquatique
+        "nom": "Level 4 - AQUATIC",
+        "longueur": 24000,
+        "vitesse": 5.8,
+        "vitesse_max": 9.5,
+        "acceleration": 0.0016,
+        "gap_min": 190,
+        "gap_max": 300,
+        "generer_obstacles": True,
+        "generer_gardes": True,
+        "ai_j2": True,
+    },
+    5: {  # Niveau 5: Boss
+        "nom": "Level 5 - BOSS",
+        "longueur": 30000,
+        "vitesse": 7.0,
+        "vitesse_max": 11.0,
+        "acceleration": 0.0020,
+        "gap_min": 150,
+        "gap_max": 240,
+        "generer_obstacles": True,
+        "generer_gardes": True,
         "ai_j2": True,
     },
 }
@@ -1266,6 +1294,187 @@ class Piece:
 
 
 # ──────────────────────────────────────────────
+#  PROJECTILE
+# ──────────────────────────────────────────────
+class Projectile:
+    """
+    Projectile tiré par un Garde ennemi vers la gauche (vers les joueurs).
+
+    Deux types :
+      "rapide" → petit (r=5), rapide, jaune/orange — tire fréquemment
+      "lent"   → gros (r=13), lent, violet        — tire lentement
+
+    Mécanique d'esquive : le projectile voyage à y = y_sol - 45, hauteur qui
+    touche un joueur DEBOUT mais passe au-dessus d'un joueur ACCROUPI.
+    """
+    _COULEURS = {"rapide": (255, 200, 50), "lent": (175, 50, 255)}
+
+    def __init__(self, x, y, type_proj):
+        self.x          = float(x)
+        self.y          = float(y)
+        self.type_proj  = type_proj
+        if type_proj == "rapide":
+            self.vitesse_propre = 7
+            self.rayon_visuel   = 5
+            self.rayon_hitbox   = 5
+        else:
+            self.vitesse_propre = 2
+            self.rayon_visuel   = 13
+            self.rayon_hitbox   = 10   # hitbox légèrement réduite pour être fair
+        self.couleur = self._COULEURS[type_proj]
+        self.anim    = random.randint(0, 30)
+        self.actif   = True
+
+    def update(self, vitesse):
+        self.x -= self.vitesse_propre + vitesse
+        self.anim = (self.anim + 1) % 30
+        if self.x < -80:
+            self.actif = False
+
+    def get_rect(self):
+        r = self.rayon_hitbox
+        return pygame.Rect(int(self.x) - r, int(self.y) - r, r * 2, r * 2)
+
+    def dessiner(self, ecran):
+        cx, cy = int(self.x), int(self.y)
+        r = self.rayon_visuel
+        if self.type_proj == "rapide":
+            # Traînée orange dégradée (à droite du projectile)
+            for i in range(3):
+                shade = tuple(max(0, c - i * 55) for c in self.couleur)
+                pygame.draw.circle(ecran, shade, (cx + i * 8, cy), max(1, r - i))
+            # Cœur lumineux
+            pygame.draw.circle(ecran, (255, 255, 210), (cx - 1, cy - 1), max(1, r // 2))
+        else:
+            # Pulsation lente
+            pulse = int(abs(math.sin(self.anim * 0.21)) * 3)
+            # Halo sombre extérieur
+            halo = tuple(max(0, c - 70) for c in self.couleur)
+            pygame.draw.circle(ecran, halo, (cx, cy), r + pulse + 4)
+            # Corps violet
+            pygame.draw.circle(ecran, self.couleur, (cx, cy), r + pulse)
+            # Contour clair
+            pygame.draw.circle(ecran, (215, 140, 255), (cx, cy), r + pulse, 2)
+            # Reflet
+            pygame.draw.circle(ecran, (240, 210, 255),
+                               (cx - r // 3, cy - r // 3), max(1, r // 3))
+
+
+# ──────────────────────────────────────────────
+#  GARDE
+# ──────────────────────────────────────────────
+class Garde:
+    """
+    Ennemi perché sur un obstacle "high" existant (stalactite ou beam).
+    La collision du slide est déjà gérée par l'obstacle sous-jacent.
+
+    Le garde commence à tirer avant d'être visible (~500 px off-screen) :
+    les joueurs voient d'abord les projectiles arriver, puis découvrent le garde.
+
+    Deux types :
+      "rapide" → orange, tir fréquent (~0.55 s), petit projectile jaune
+      "lent"   → violet, tir espacé  (~1.4 s),  gros projectile violet
+
+    Axe de tir : y_sol - 45
+      → touche un joueur DEBOUT (hitbox top = y_sol - 57)
+      → passe AU-DESSUS d'un joueur ACCROUPI (hitbox top = y_sol - 27)
+    """
+    _TIR_OFFSET = 45
+
+    _TIMERS  = {"rapide": 80, "lent": 200}
+    _COULEURS = {"rapide": (255, 145, 30), "lent": (155, 45, 215)}
+
+    def __init__(self, x_centre, y_sol, type_garde, obs_y):
+        self.x       = float(x_centre)   # centre horizontal de l'obstacle porteur
+        self.y_sol   = y_sol
+        self.type    = type_garde
+        self.obs_y   = obs_y              # y du dessus de l'obstacle (pieds du garde)
+        self.couleur = self._COULEURS[type_garde]
+        self.projectiles: list[Projectile] = []
+        self.timer   = random.randint(20, self._TIMERS[type_garde])
+        self.actif   = False
+        self.anim    = random.randint(0, 60)
+
+    @property
+    def _y_tir(self):
+        return self.y_sol - self._TIR_OFFSET
+
+    def update(self, vitesse):
+        self.x   -= vitesse
+        self.anim = (self.anim + 1) % 60
+
+        if not self.actif and self.x <= LARGEUR + 480:
+            self.actif = True
+
+        if self.actif and self.x > -60:
+            self.timer -= 1
+            if self.timer <= 0:
+                self.projectiles.append(Projectile(self.x, self._y_tir, self.type))
+                self.timer = self._TIMERS[self.type]
+
+        for p in self.projectiles:
+            p.update(vitesse)
+        self.projectiles = [p for p in self.projectiles if p.actif]
+
+    def dessiner_garde(self, ecran):
+        """Dessin placeholder du garde debout sur l'obstacle (appelé après l'obstacle)."""
+        cx = int(self.x)
+        if not (-20 < cx < LARGEUR + 20):
+            return
+
+        yp     = int(self.obs_y)          # pieds du garde = dessus de l'obstacle
+        col    = self.couleur
+        sombre = tuple(max(0, c - 65) for c in col)
+        clair  = tuple(min(255, c + 55) for c in col)
+
+        # ── Corps ──────────────────────────────────────────────────────────
+        corps_w, corps_h = 18, 34
+        corps_y = yp - corps_h
+        pygame.draw.rect(ecran, col,    (cx - corps_w // 2, corps_y, corps_w, corps_h),
+                         border_radius=4)
+        pygame.draw.rect(ecran, sombre, (cx - corps_w // 2, corps_y, corps_w, corps_h),
+                         2, border_radius=4)
+        pygame.draw.line(ecran, clair,
+                         (cx - corps_w // 2 + 2, corps_y + 3),
+                         (cx - corps_w // 2 + 2, corps_y + corps_h - 4), 1)
+
+        # ── Tête ───────────────────────────────────────────────────────────
+        tete_r  = 11
+        tete_cy = corps_y - tete_r - 2
+        pygame.draw.circle(ecran, col,    (cx, tete_cy), tete_r)
+        pygame.draw.circle(ecran, sombre, (cx, tete_cy), tete_r, 2)
+        pygame.draw.circle(ecran, (15, 15, 25), (cx - 4, tete_cy - 1), 2)
+        pygame.draw.circle(ecran, (15, 15, 25), (cx + 2, tete_cy - 1), 2)
+
+        # ── Bras pointé vers le bas-gauche (vers le joueur en contrebas) ───
+        bras_y = corps_y + 10
+        pygame.draw.line(ecran, col,
+                         (cx - corps_w // 2, bras_y),
+                         (cx - corps_w // 2 - 14, bras_y + 8), 3)
+
+        arm_tip_x = cx - corps_w // 2 - 14
+        arm_tip_y = bras_y + 8
+        if self.type == "rapide":
+            pygame.draw.rect(ecran, sombre,
+                             (arm_tip_x - 12, arm_tip_y - 3, 12, 5), border_radius=1)
+            pygame.draw.circle(ecran, (255, 230, 80), (arm_tip_x - 13, arm_tip_y - 1), 3)
+        else:
+            pygame.draw.rect(ecran, sombre,
+                             (arm_tip_x - 15, arm_tip_y - 5, 15, 8), border_radius=2)
+            pygame.draw.circle(ecran, col,   (arm_tip_x - 17, arm_tip_y), 6)
+            pygame.draw.circle(ecran, clair, (arm_tip_x - 17, arm_tip_y), 4)
+
+        badge = "▶▶" if self.type == "rapide" else "◉"
+        badge_surf = police(11).render(badge, True, (240, 240, 240))
+        ecran.blit(badge_surf, badge_surf.get_rect(center=(cx, corps_y - 5)))
+
+    def dessiner_projectiles(self, ecran):
+        for p in self.projectiles:
+            if -40 < p.x < LARGEUR + 40:
+                p.dessiner(ecran)
+
+
+# ──────────────────────────────────────────────
 #  CIRCUIT
 # ──────────────────────────────────────────────
 class Circuit:
@@ -1280,7 +1489,7 @@ class Circuit:
     Chaque frame, update(vitesse) fait avancer tous les objets vers la gauche.
     """
     def __init__(self, y_sol, longueur_niveau, gap_min=300, gap_max=420, generer_obstacles=True,
-                 obstacle_palette=None):
+                 obstacle_palette=None, generer_gardes=False):
         self.y_sol             = y_sol
         self.longueur_niveau   = longueur_niveau
         self.gap_min           = gap_min
@@ -1289,8 +1498,11 @@ class Circuit:
         self.obstacle_palette  = obstacle_palette
         self.obstacles: list[Obstacle] = []
         self.pieces:    list[Piece]    = []
+        self.gardes:    list[Garde]    = []
         if self.generer_obstacles:
             self._generer()
+        if generer_gardes:
+            self._generer_gardes()
 
     def _generer(self):
         x         = 920
@@ -1318,12 +1530,45 @@ class Circuit:
                 py = self.y_sol - random.randint(35, 80)
                 self.pieces.append(Piece(px, py))
 
+    def _generer_gardes(self):
+        """
+        Place 4 gardes sur des obstacles "high" existants (stalactite / beam),
+        répartis à ≈ 20 / 40 / 60 / 80 % du niveau.
+        Types alternés : rapide → lent → rapide → lent.
+
+        Chaque garde hérite de l'x-centre et du y-dessus de l'obstacle choisi.
+        La collision "slide" est déjà gérée par l'obstacle lui-même.
+        """
+        hauts = sorted(
+            [obs for obs in self.obstacles if obs.type == "high"],
+            key=lambda o: o.x,
+        )
+        if len(hauts) < 4:
+            return   # pas assez d'obstacles hauts pour placer 4 gardes
+
+        pcts  = [0.20, 0.40, 0.60, 0.80]
+        types = ["rapide", "lent", "rapide", "lent"]
+        deja  = set()
+
+        for pct, tg in zip(pcts, types):
+            cible_x = pct * self.longueur_niveau + 220
+            candidats = [o for o in hauts if id(o) not in deja]
+            if not candidats:
+                break
+            obs = min(candidats, key=lambda o: abs(o.x - cible_x))
+            deja.add(id(obs))
+            # Centre horizontal de l'obstacle ; obs.y = dessus (pieds du garde)
+            cx = obs.x + obs.largeur // 2
+            self.gardes.append(Garde(cx, self.y_sol, tg, obs_y=obs.y))
+
     def update(self, vitesse):
         for obs in self.obstacles:
             obs.deplacer(vitesse)
         for piece in self.pieces:
             if not piece.collectee:
                 piece.deplacer(vitesse)
+        for garde in self.gardes:
+            garde.update(vitesse)
 
     def dessiner(self, ecran, pulse):
         for piece in self.pieces:
@@ -1332,6 +1577,15 @@ class Circuit:
         for obs in self.obstacles:
             if -120 < obs.x < LARGEUR + 120:
                 obs.dessiner(ecran, pulse)
+        # Gardes dessinés APRÈS les obstacles (perchés dessus)
+        for garde in self.gardes:
+            if -40 < garde.x < LARGEUR + 40:
+                garde.dessiner_garde(ecran)
+
+    def dessiner_projectiles(self, ecran):
+        """Projectiles dessinés APRÈS les joueurs pour rester visibles au premier plan."""
+        for garde in self.gardes:
+            garde.dessiner_projectiles(ecran)
 
 
 # ──────────────────────────────────────────────
@@ -1364,8 +1618,12 @@ def dessiner_hud(ecran, j1, j2, distance, longueur_niveau, vitesse, vitesse_max,
     ecran.blit(police(17).render(nom_niveau.upper(), True, (95, 195, 255)), (S1_X, PAD + 8))
     ecran.blit(police(18).render("J1", True, C_J1), (S1_X,      PAD + 32))
     j1.dessiner_vies(ecran,                          S1_X + 30,  PAD + 30)
-    ecran.blit(police(18).render("J2", True, C_J2), (S1_X,      PAD + 60))
-    j2.dessiner_vies(ecran,                          S1_X + 30,  PAD + 58)
+    if j2 is not None:
+        ecran.blit(police(18).render("J2", True, C_J2), (S1_X,      PAD + 60))
+        j2.dessiner_vies(ecran,                          S1_X + 30,  PAD + 58)
+    else:
+        # Mode solo J1 : affiche "SOLO" à la place de J2
+        ecran.blit(police(18).render("SOLO", True, (140, 140, 160)), (S1_X, PAD + 60))
 
     # Separateur 1
     SEP1 = PAD + 180
@@ -1432,12 +1690,13 @@ def dessiner_hud(ecran, j1, j2, distance, longueur_niveau, vitesse, vitesse_max,
 # ──────────────────────────────────────────────
 class EcranFin:
     def __init__(self, victoire: bool, nom_niveau: str, score_pieces: int = 0,
-                 score_distance: int = 0):
-        self.victoire       = victoire
-        self.nom_niveau     = nom_niveau
-        self.score_pieces   = score_pieces
-        self.score_distance = score_distance
-        self.frame          = 0
+                 score_distance: int = 0, numero_niveau: int = None):
+        self.victoire        = victoire
+        self.nom_niveau      = nom_niveau
+        self.score_pieces    = score_pieces
+        self.score_distance  = score_distance
+        self.numero_niveau   = numero_niveau   # None si niveau inconnu
+        self.frame           = 0
         self.particules: list[Particule] = []
         self.image_perdu = None
         if not self.victoire:
@@ -1517,14 +1776,23 @@ class EcranFin:
         if self.victoire:
             msg = "Bravo ! Les deux joueurs ont franchi la ligne d'arrivée !"
         else:
-            msg = "Un joueur est tombé — les deux perdent. Appuyez sur R pour recommencer."
+            msg = "Un joueur est tombé — les deux perdent."
         ecran.blit(police(26).render(msg, True, (200, 200, 200)),
                    police(26).render(msg, True, (200, 200, 200))
                    .get_rect(center=(LARGEUR // 2, HAUTEUR // 2 + 122)))
 
-        # ── Blink aide ───────────────────────────────────────────────────────
+        # ── Blink aide (touches disponibles) ─────────────────────────────────
         if (self.frame // 25) % 2 == 0:
-            aide = police(28).render("R = rejouer   |   ESC = retour au menu", True, BLANC)
+            # Construit dynamiquement la liste des touches selon le contexte
+            options = ["R = rejouer"]
+            a_prochain = (self.numero_niveau is not None
+                          and (self.numero_niveau + 1) in NIVEAUX)
+            if self.victoire:
+                if a_prochain:
+                    options.insert(0, "N = niveau suivant")
+                options.insert(0 if not a_prochain else 1, "D = changer difficulté")
+            options.append("ESC = menu")
+            aide = police(26).render("   |   ".join(options), True, BLANC)
             ecran.blit(aide, aide.get_rect(center=(LARGEUR // 2, HAUTEUR // 2 + 155)))
 
 
@@ -1556,8 +1824,9 @@ class JeuDeuxJoueurs:
     def __init__(self, config_niveau=None, client_reseau=None, player_id=0, seed=None):
         if config_niveau is None:
             config_niveau = {}
-        self.config_niveau = config_niveau
-        self.nom_niveau    = config_niveau.get("nom", "Libre")
+        self.config_niveau  = config_niveau
+        self.nom_niveau     = config_niveau.get("nom", "Libre")
+        self.numero_niveau  = config_niveau.get("_numero")  # int ou None
 
         self.fond = Skybox()
         self.longueur_niveau = config_niveau.get("longueur", 14000)
@@ -1571,15 +1840,20 @@ class JeuDeuxJoueurs:
         self.y_sol_j1 = int(HAUTEUR * 0.445)
         self.y_sol_j2 = min(int(HAUTEUR * 0.945), HAUTEUR - 43)
 
+        controles_j1 = config_niveau.get("controles_j1", (pygame.K_z, pygame.K_s))
+        couleurs_j1  = config_niveau.get("couleurs_j1", ((225, 120, 90), (255, 170, 140)))
+        couleurs_j2  = config_niveau.get("couleurs_j2", ((90, 145, 230), (140, 195, 255)))
+        nom_j1       = config_niveau.get("nom_j1", "J1")
+        nom_j2       = config_niveau.get("nom_j2", "J2")
         self.joueur1 = Joueur(
             x=220, y_sol=self.y_sol_j1,
-            controles=(pygame.K_z, pygame.K_s),
-            nom="J1", couleurs=((225, 120, 90), (255, 170, 140)),
+            controles=controles_j1,
+            nom=nom_j1, couleurs=couleurs_j1,
         )
         self.joueur2 = Joueur(
             x=220, y_sol=self.y_sol_j2,
             controles=(pygame.K_UP, pygame.K_DOWN),
-            nom="J2", couleurs=((90, 145, 230), (140, 195, 255)),
+            nom=nom_j2, couleurs=couleurs_j2,
         )
 
         # Vies issues de la config du niveau (5 en easy, 3 en hard...)
@@ -1602,23 +1876,33 @@ class JeuDeuxJoueurs:
         gap_min           = config_niveau.get("gap_min", 400)
         gap_max           = config_niveau.get("gap_max", 560)
         generer_obstacles = config_niveau.get("generer_obstacles", True)
+        generer_gardes    = config_niveau.get("generer_gardes",    False)
         palette_j1, palette_j2 = self.fond.palettes_obstacles()
         self.circuit_j1 = Circuit(
             self.y_sol_j1, self.longueur_niveau, gap_min, gap_max,
             generer_obstacles, obstacle_palette=palette_j1,
+            generer_gardes=generer_gardes,
         )
         self.circuit_j2 = Circuit(
             self.y_sol_j2, self.longueur_niveau, gap_min, gap_max,
             generer_obstacles, obstacle_palette=palette_j2,
+            generer_gardes=generer_gardes,
         )
 
         # Pistes de sol
         self.piste_j1 = PisteSol(self.y_sol_j1)
         self.piste_j2 = PisteSol(self.y_sol_j2)
 
-        # ── IA J2 : activée uniquement en mode solo ──────────────────────────
-        # En mode réseau, chaque PC contrôle son propre joueur : l'IA est désactivée.
-        self.ai_j2          = config_niveau.get("ai_j2", False) and client_reseau is None
+        # ── Mode solo J1 seul ────────────────────────────────────────────────
+        # Si True : J2 n'existe pas (pas de mise à jour, pas de dessin, pas de collision).
+        # La piste du bas est quand même rendue (fond + sol qui défile) mais vide.
+        self.solo_j1 = config_niveau.get("solo_j1", False)
+
+        # ── IA J2 : activée uniquement en mode solo_ia ───────────────────────
+        # Désactivée en réseau (chaque PC contrôle son joueur) et en solo_j1 (pas de J2).
+        self.ai_j2             = (config_niveau.get("ai_j2", False)
+                                  and client_reseau is None
+                                  and not self.solo_j1)
         self.j2_manuel_detecte = False   # désactive l'IA si J2 appuie sur ses touches
 
         # ── Score pièces ────────────────────────────────────────────────────
@@ -1657,6 +1941,7 @@ class JeuDeuxJoueurs:
             victoire, self.nom_niveau,
             score_pieces=self.score_pieces,
             score_distance=int(self.distance / 10),
+            numero_niveau=self.numero_niveau,
         )
         SONS.play("win" if victoire else "lose")
 
@@ -1713,19 +1998,21 @@ class JeuDeuxJoueurs:
             self._update_reseau(touches)
             return
 
-        # ── Détection jeu manuel J2 ──────────────────────────────────────────
-        if touches[pygame.K_UP] or touches[pygame.K_DOWN]:
-            self.j2_manuel_detecte = True
-
         # ── Mise à jour joueurs ──────────────────────────────────────────────
         self.joueur1.update(touches)
-        if self.ai_j2 and not self.j2_manuel_detecte:
-            self.joueur2.update(self._ia_touches_j2(touches))
-        else:
-            self.joueur2.update(touches)
-
-        if self.joueur1.vient_de_sauter or self.joueur2.vient_de_sauter:
+        if self.joueur1.vient_de_sauter:
             SONS.play("jump")
+
+        if not self.solo_j1:
+            # Détection jeu manuel J2 (désactive l'IA si le joueur touche ses touches)
+            if touches[pygame.K_UP] or touches[pygame.K_DOWN]:
+                self.j2_manuel_detecte = True
+            if self.ai_j2 and not self.j2_manuel_detecte:
+                self.joueur2.update(self._ia_touches_j2(touches))
+            else:
+                self.joueur2.update(touches)
+            if self.joueur2.vient_de_sauter:
+                SONS.play("jump")
 
         # ── Accélération ────────────────────────────────────────────────────
         if self.vitesse < self.vitesse_max:
@@ -1760,7 +2047,7 @@ class JeuDeuxJoueurs:
         if self._milestone_flash > 0:
             self._milestone_flash -= 1
 
-        # ── Collisions J1 ────────────────────────────────────────────────────
+        # ── Collisions J1 (obstacles + projectiles des gardes) ───────────────
         rect1 = self.joueur1.get_rect().inflate(-16, -18)
         for obs in self.circuit_j1.obstacles:
             if rect1.colliderect(obs.get_rect()):
@@ -1770,21 +2057,44 @@ class JeuDeuxJoueurs:
                     if not self.joueur1.en_vie:
                         self._terminer(False)
                         return
+        for garde in self.circuit_j1.gardes:
+            for proj in garde.projectiles:
+                if rect1.colliderect(proj.get_rect()):
+                    proj.actif = False
+                    if self.joueur1.touche():
+                        SONS.play("hit")
+                        self._spawn_particules(self.joueur1)
+                        if not self.joueur1.en_vie:
+                            self._terminer(False)
+                            return
 
-        # ── Collisions J2 : sa mort = game over pour les deux ──────────────
-        rect2 = self.joueur2.get_rect().inflate(-16, -18)
-        for obs in self.circuit_j2.obstacles:
-            if rect2.colliderect(obs.get_rect()):
-                if self.joueur2.touche():
-                    SONS.play("hit")
-                    self._spawn_particules(self.joueur2)
-                    if not self.joueur2.en_vie:
-                        self._terminer(False)
-                        return
+        # ── Collisions J2 (désactivées en solo_j1) ───────────────────────────
+        if not self.solo_j1:
+            rect2 = self.joueur2.get_rect().inflate(-16, -18)
+            for obs in self.circuit_j2.obstacles:
+                if rect2.colliderect(obs.get_rect()):
+                    if self.joueur2.touche():
+                        SONS.play("hit")
+                        self._spawn_particules(self.joueur2)
+                        if not self.joueur2.en_vie:
+                            self._terminer(False)
+                            return
+            for garde in self.circuit_j2.gardes:
+                for proj in garde.projectiles:
+                    if rect2.colliderect(proj.get_rect()):
+                        proj.actif = False
+                        if self.joueur2.touche():
+                            SONS.play("hit")
+                            self._spawn_particules(self.joueur2)
+                            if not self.joueur2.en_vie:
+                                self._terminer(False)
+                                return
 
         # ── Collecte des pièces ──────────────────────────────────────────────
-        for circuit, joueur in ((self.circuit_j1, self.joueur1),
-                                (self.circuit_j2, self.joueur2)):
+        circuits_actifs = [(self.circuit_j1, self.joueur1)]
+        if not self.solo_j1:
+            circuits_actifs.append((self.circuit_j2, self.joueur2))
+        for circuit, joueur in circuits_actifs:
             if not joueur.en_vie:
                 continue
             jrect = joueur.get_rect()
@@ -1870,7 +2180,7 @@ class JeuDeuxJoueurs:
         if self._milestone_flash > 0:
             self._milestone_flash -= 1
 
-        # ── Collisions du joueur local uniquement ────────────────────────────
+        # ── Collisions du joueur local uniquement (obstacles + projectiles) ───
         rect_local = joueur_local.get_rect().inflate(-16, -18)
         for obs in circuit_local.obstacles:
             if rect_local.colliderect(obs.get_rect()):
@@ -1880,6 +2190,16 @@ class JeuDeuxJoueurs:
                     if not joueur_local.en_vie:
                         self._terminer(False)
                         return
+        for garde in circuit_local.gardes:
+            for proj in garde.projectiles:
+                if rect_local.colliderect(proj.get_rect()):
+                    proj.actif = False
+                    if joueur_local.touche():
+                        SONS.play("hit")
+                        self._spawn_particules(joueur_local)
+                        if not joueur_local.en_vie:
+                            self._terminer(False)
+                            return
 
         # ── Collecte des pièces (joueur local seulement) ─────────────────────
         jrect = joueur_local.get_rect()
@@ -1939,9 +2259,11 @@ class JeuDeuxJoueurs:
 
         pulse = int(60 * abs(((self.frame % 40) / 20) - 1))
         self.circuit_j1.dessiner(ecran, pulse)
-        self.circuit_j2.dessiner(ecran, pulse)
+        # En solo_j1 : pas d'obstacles ni pièces sur la piste basse, mais le sol défile
+        if not self.solo_j1:
+            self.circuit_j2.dessiner(ecran, pulse)
 
-        # Pistes de sol
+        # Pistes de sol (toujours visibles, même en solo_j1)
         self.piste_j1.dessiner(ecran)
         self.piste_j2.dessiner(ecran)
 
@@ -1982,7 +2304,13 @@ class JeuDeuxJoueurs:
 
         # ── Joueurs ──────────────────────────────────────────────────────────
         self.joueur1.dessiner(ecran)
-        self.joueur2.dessiner(ecran)
+        if not self.solo_j1:
+            self.joueur2.dessiner(ecran)
+
+        # ── Projectiles des gardes (au premier plan, après les joueurs) ──────
+        self.circuit_j1.dessiner_projectiles(ecran)
+        if not self.solo_j1:
+            self.circuit_j2.dessiner_projectiles(ecran)
 
         # ── Particules ──────────────────────────────────────────────────────
         for p in self.particules:
@@ -2009,7 +2337,8 @@ class JeuDeuxJoueurs:
         if not self.en_jeu:
             compte_rebours_affiche = max(1, int(math.ceil(self.countdown_frames / FPS)))
 
-        dessiner_hud(ecran, self.joueur1, self.joueur2,
+        j2_hud = None if self.solo_j1 else self.joueur2
+        dessiner_hud(ecran, self.joueur1, j2_hud,
                      self.distance, self.longueur_niveau,
                      self.vitesse, self.vitesse_max,
                      self.nom_niveau, compte_rebours_affiche,
@@ -2022,7 +2351,8 @@ class JeuDeuxJoueurs:
 # ──────────────────────────────────────────────
 #  BOUCLE PRINCIPALE
 # ──────────────────────────────────────────────
-def lancer_jeu(ecran, config_niveau=None, client_reseau=None, player_id=0, seed=None):
+def lancer_jeu(ecran, config_niveau=None, client_reseau=None, player_id=0, seed=None,
+               get_nouveau_niveau=None):
     """
     Boucle principale d'une partie.
 
@@ -2031,18 +2361,24 @@ def lancer_jeu(ecran, config_niveau=None, client_reseau=None, player_id=0, seed=
     Retourne False si la fenêtre est fermée.
 
     Paramètres réseau (optionnels, passés depuis menu.py) :
-      client_reseau : ClientReseau connecté, ou None (local/solo)
-      player_id     : 0 = J1, 1 = J2
-      seed          : graine random partagée (synchronise les obstacles en réseau)
+      client_reseau    : ClientReseau connecté, ou None (local/solo)
+      player_id        : 0 = J1, 1 = J2
+      seed             : graine random partagée (synchronise les obstacles en réseau)
+      get_nouveau_niveau : callable() → config_niveau | None  (pour la touche D)
 
-    La touche R en fin de partie relance une nouvelle partie
-    (en mode réseau, R n'est pas disponible car il faudrait resynchroniser).
+    Touches en fin de partie :
+      R   = rejouer le même niveau (mode local/solo uniquement)
+      N   = niveau suivant (si existe)
+      D   = choisir un autre niveau (via get_nouveau_niveau callback)
+      ESC = retour au menu
     """
-    horloge = pygame.time.Clock()
-    partie  = JeuDeuxJoueurs(config_niveau,
-                             client_reseau=client_reseau,
-                             player_id=player_id,
-                             seed=seed)
+    horloge   = pygame.time.Clock()
+    partie    = JeuDeuxJoueurs(config_niveau,
+                               client_reseau=client_reseau,
+                               player_id=player_id,
+                               seed=seed)
+    flash_msg  = ""   # message temporaire affiché sur l'écran de fin
+    flash_timer = 0   # durée restante en frames
 
     while True:
         horloge.tick(FPS)
@@ -2053,11 +2389,54 @@ def lancer_jeu(ecran, config_niveau=None, client_reseau=None, player_id=0, seed=
             if event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_ESCAPE:
                     return True
-                # R = rejouer uniquement en mode local/solo
-                if partie.termine and event.key == pygame.K_r and client_reseau is None:
-                    return lancer_jeu(ecran, config_niveau)
+
+                if partie.termine and client_reseau is None:
+                    num = partie.numero_niveau
+
+                    # R = rejouer le même niveau
+                    if event.key == pygame.K_r:
+                        return lancer_jeu(ecran, config_niveau,
+                                          get_nouveau_niveau=get_nouveau_niveau)
+
+                    # N = niveau suivant (si disponible)
+                    if event.key == pygame.K_n and partie.victoire:
+                        if num is not None and (num + 1) in NIVEAUX:
+                            cfg_suivant = dict(NIVEAUX[num + 1], _numero=num + 1)
+                            # Conserve mode, contrôles clavier, personnages et difficulté (vies)
+                            for cle in ("ai_j2", "solo_j1", "controles_j1",
+                                        "couleurs_j1", "nom_j1",
+                                        "couleurs_j2", "nom_j2",
+                                        "vies"):
+                                if cle in config_niveau:
+                                    cfg_suivant[cle] = config_niveau[cle]
+                            return lancer_jeu(ecran, cfg_suivant,
+                                              get_nouveau_niveau=get_nouveau_niveau)
+                        else:
+                            flash_msg   = "Bientôt disponible !"
+                            flash_timer = 180
+
+                    # D = choisir un autre niveau (via menu)
+                    if event.key == pygame.K_d and partie.victoire and get_nouveau_niveau:
+                        nouveau = get_nouveau_niveau()
+                        if nouveau is not None:
+                            nouveau = dict(nouveau)
+                            nouveau["ai_j2"]   = config_niveau.get("ai_j2",   False)
+                            nouveau["solo_j1"] = config_niveau.get("solo_j1", False)
+                            return lancer_jeu(ecran, nouveau,
+                                              get_nouveau_niveau=get_nouveau_niveau)
+
+        if flash_timer > 0:
+            flash_timer -= 1
 
         touches = pygame.key.get_pressed()
         partie.update(touches)
         partie.dessiner(ecran)
+
+        # Flash message (ex : "Bientôt disponible !")
+        if flash_timer > 0:
+            alpha = min(255, flash_timer * 6)
+            surf = police(30).render(flash_msg, True, JAUNE)
+            surf.set_alpha(alpha)
+            ecran.blit(surf, surf.get_rect(center=(LARGEUR // 2, HAUTEUR // 2 + 190)))
+
         pygame.display.flip()
