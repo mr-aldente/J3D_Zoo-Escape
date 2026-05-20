@@ -28,6 +28,12 @@ LARGEUR = 1024
 HAUTEUR = 768
 FPS = 144
 
+# Frames attendues par personnage (dossiers assets/{dossier}/)
+PERSONNAGE_ANIM = {
+    "Fox":   {"run": 6, "jump": 5, "slide": 5},
+    "Raton": {"run": 6, "jump": 5, "slide": 4},
+}
+
 # Couleurs
 BLANC      = (255, 255, 255)
 NOIR       = (0,   0,   0)
@@ -477,7 +483,7 @@ class Joueur:
       - Slide : hauteur réduite, durée minimale imposée pour l'animation
 
     Animations :
-      - Priorité : dossier Fox/ → sprites individuels PNG
+      - Priorité : dossier assets/{personnage}/ → sprites individuels PNG
       - Fallback 1 : Running_animation.png + Jumping_animation.png (bandes de frames)
       - Fallback 2 : animation.png (ancien format spritesheet)
       - Fallback 3 : rendu géométrique pygame (rectangles + cercles)
@@ -486,11 +492,12 @@ class Joueur:
     """
     VIES_MAX = 3
 
-    def __init__(self, x, y_sol, controles, nom, couleurs):
+    def __init__(self, x, y_sol, controles, nom, couleurs, personnage="Fox"):
         self.x = float(x)
         self.y_sol = y_sol     # Y du sol pour cette piste (ancre verticale)
         self.nom = nom
         self.couleurs = couleurs
+        self.personnage = personnage if personnage in PERSONNAGE_ANIM else "Fox"
         self.controles = controles  # (touche_saut, touche_slide)
 
         self.largeur = 48
@@ -751,14 +758,21 @@ class Joueur:
     def _charger_sprite(self):
         try:
             dossier_courant = os.path.dirname(__file__)
-            dossier_fox = os.path.join(dossier_courant, "assets", "Fox")
-            dossier_courir = os.path.join(dossier_fox, "Courir_animation")
-            dossier_saut = os.path.join(dossier_fox, "Saut_animation")
-            dossier_accroupi = os.path.join(dossier_fox, "accroupie_animation")
+            anim = PERSONNAGE_ANIM[self.personnage]
+            dossier_perso = os.path.join(dossier_courant, "assets", self.personnage)
+            dossier_courir = os.path.join(dossier_perso, "Courir_animation")
+            dossier_saut = os.path.join(dossier_perso, "Saut_animation")
+            dossier_accroupi = os.path.join(dossier_perso, "accroupie_animation")
 
-            self.running_frames = self._charger_frames_depuis_dossier(dossier_courir, 6, 120)
-            self.jumping_frames = self._charger_frames_depuis_dossier(dossier_saut, 5, 126)
-            self.sliding_frames = self._charger_frames_depuis_dossier(dossier_accroupi, 5, 92)
+            self.running_frames = self._charger_frames_depuis_dossier(
+                dossier_courir, anim["run"], 120,
+            )
+            self.jumping_frames = self._charger_frames_depuis_dossier(
+                dossier_saut, anim["jump"], 126,
+            )
+            self.sliding_frames = self._charger_frames_depuis_dossier(
+                dossier_accroupi, anim["slide"], 92,
+            )
 
             if self.running_frames:
                 if not self.jumping_frames:
@@ -1842,18 +1856,22 @@ class JeuDeuxJoueurs:
 
         controles_j1 = config_niveau.get("controles_j1", (pygame.K_z, pygame.K_s))
         couleurs_j1  = config_niveau.get("couleurs_j1", ((225, 120, 90), (255, 170, 140)))
-        couleurs_j2  = config_niveau.get("couleurs_j2", ((90, 145, 230), (140, 195, 255)))
+        couleurs_j2  = config_niveau.get("couleurs_j2", ((140, 150, 170), (200, 210, 225)))
         nom_j1       = config_niveau.get("nom_j1", "J1")
         nom_j2       = config_niveau.get("nom_j2", "J2")
+        personnage_j1 = config_niveau.get("personnage_j1", "Fox")
+        personnage_j2 = config_niveau.get("personnage_j2", "Raton")
         self.joueur1 = Joueur(
             x=220, y_sol=self.y_sol_j1,
             controles=controles_j1,
             nom=nom_j1, couleurs=couleurs_j1,
+            personnage=personnage_j1,
         )
         self.joueur2 = Joueur(
             x=220, y_sol=self.y_sol_j2,
             controles=(pygame.K_UP, pygame.K_DOWN),
             nom=nom_j2, couleurs=couleurs_j2,
+            personnage=personnage_j2,
         )
 
         # Vies issues de la config du niveau (5 en easy, 3 en hard...)
@@ -2404,8 +2422,8 @@ def lancer_jeu(ecran, config_niveau=None, client_reseau=None, player_id=0, seed=
                             cfg_suivant = dict(NIVEAUX[num + 1], _numero=num + 1)
                             # Conserve mode, contrôles clavier, personnages et difficulté (vies)
                             for cle in ("ai_j2", "solo_j1", "controles_j1",
-                                        "couleurs_j1", "nom_j1",
-                                        "couleurs_j2", "nom_j2",
+                                        "couleurs_j1", "nom_j1", "personnage_j1",
+                                        "couleurs_j2", "nom_j2", "personnage_j2",
                                         "vies"):
                                 if cle in config_niveau:
                                     cfg_suivant[cle] = config_niveau[cle]

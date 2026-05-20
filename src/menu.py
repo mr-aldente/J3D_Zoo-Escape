@@ -103,12 +103,12 @@ def _appliquer_layout(layout: str) -> None:
 
 # ── Personnages jouables ────────────────────────────────────────────────────────
 PERSONNAGES = [
-    {"nom": "Fox",      "couleurs": ((225, 120,  90), (255, 170, 140))},
-    {"nom": "Panda",    "couleurs": ((220, 220, 220), (255, 255, 255))},
-    {"nom": "Lion",     "couleurs": ((230, 180,  60), (255, 220, 120))},
-    {"nom": "Penguin",  "couleurs": ((60,   80, 120), (120, 140, 180))},
-    {"nom": "Parrot",   "couleurs": ((80,  200, 100), (140, 230, 150))},
-    {"nom": "Shark",    "couleurs": ((60,  150, 230), (120, 190, 255))},
+    {"nom": "Fox",      "dossier": "Fox",   "couleurs": ((225, 120,  90), (255, 170, 140))},
+    {"nom": "Raton",    "dossier": "Raton", "couleurs": ((140, 150, 170), (200, 210, 225))},
+    {"nom": "Lion",     "dossier": "Fox",   "couleurs": ((230, 180,  60), (255, 220, 120))},
+    {"nom": "Penguin",  "dossier": "Fox",   "couleurs": ((60,   80, 120), (120, 140, 180))},
+    {"nom": "Parrot",   "dossier": "Fox",   "couleurs": ((80,  200, 100), (140, 230, 150))},
+    {"nom": "Shark",    "dossier": "Fox",   "couleurs": ((60,  150, 230), (120, 190, 255))},
 ]
 PERSO_J1_INDEX = 0
 PERSO_J2_INDEX = 1
@@ -1008,7 +1008,7 @@ def afficher_selection_personnages(ecran, largeur, hauteur, nb_joueurs=2):
     Écran de sélection de personnage.
     nb_joueurs=1 → seul J1 choisit (mode solo_j1) ; J2 garde son perso par défaut.
     nb_joueurs=2 → J1 puis J2 choisissent.
-    Retourne un dict {'couleurs_j1': ..., 'nom_j1': ..., 'couleurs_j2': ..., 'nom_j2': ...}
+    Retourne un dict avec couleurs, noms et dossiers sprite (personnage_j1/j2).
     Met à jour PERSO_J1_INDEX / PERSO_J2_INDEX globalement.
     """
     global PERSO_J1_INDEX, PERSO_J2_INDEX
@@ -1096,10 +1096,12 @@ def afficher_selection_personnages(ecran, largeur, hauteur, nb_joueurs=2):
         PERSO_J2_INDEX = _choisir(2, PERSO_J2_INDEX)
 
     return {
-        "couleurs_j1": PERSONNAGES[PERSO_J1_INDEX]["couleurs"],
-        "nom_j1":      PERSONNAGES[PERSO_J1_INDEX]["nom"],
-        "couleurs_j2": PERSONNAGES[PERSO_J2_INDEX]["couleurs"],
-        "nom_j2":      PERSONNAGES[PERSO_J2_INDEX]["nom"],
+        "couleurs_j1":    PERSONNAGES[PERSO_J1_INDEX]["couleurs"],
+        "nom_j1":         PERSONNAGES[PERSO_J1_INDEX]["nom"],
+        "personnage_j1":  PERSONNAGES[PERSO_J1_INDEX]["dossier"],
+        "couleurs_j2":    PERSONNAGES[PERSO_J2_INDEX]["couleurs"],
+        "nom_j2":         PERSONNAGES[PERSO_J2_INDEX]["nom"],
+        "personnage_j2":  PERSONNAGES[PERSO_J2_INDEX]["dossier"],
     }
 
 
@@ -1151,10 +1153,12 @@ def afficher_carte_monde(ecran, largeur, hauteur, difficulte: str):
 
     # Sélection de personnage courante (initialisée avec les globaux)
     _perso_selection: dict = {
-        "couleurs_j1": PERSONNAGES[PERSO_J1_INDEX]["couleurs"],
-        "nom_j1":      PERSONNAGES[PERSO_J1_INDEX]["nom"],
-        "couleurs_j2": PERSONNAGES[PERSO_J2_INDEX]["couleurs"],
-        "nom_j2":      PERSONNAGES[PERSO_J2_INDEX]["nom"],
+        "couleurs_j1":   PERSONNAGES[PERSO_J1_INDEX]["couleurs"],
+        "nom_j1":        PERSONNAGES[PERSO_J1_INDEX]["nom"],
+        "personnage_j1": PERSONNAGES[PERSO_J1_INDEX]["dossier"],
+        "couleurs_j2":   PERSONNAGES[PERSO_J2_INDEX]["couleurs"],
+        "nom_j2":        PERSONNAGES[PERSO_J2_INDEX]["nom"],
+        "personnage_j2": PERSONNAGES[PERSO_J2_INDEX]["dossier"],
     }
 
     # ── Surfaces des barres d'interface (recréées une seule fois) ────────────
