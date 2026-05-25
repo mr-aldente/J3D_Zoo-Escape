@@ -1,2 +1,2 @@
 pygame
-opencv-python
+opencv-python-headless

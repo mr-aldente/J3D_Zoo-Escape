@@ -111,20 +111,25 @@ class GameServer:
     
     def handle_client(self, player_id: int, client_socket: socket.socket):
         """Gère la communication avec un client"""
+        client_socket.settimeout(5.0)  # 5 sec timeout pour détecter les déconnexions
         try:
             while self.running:
                 # Reçoit les données du client
                 data = self.receive_data(client_socket)
                 
                 if not data:
+                    print(f"[SERVEUR] Joueur {player_id} : aucune donnée reçue, déconnexion")
                     break
                 
+                msg_type = data.get('type')
+                
                 # Traite selon le type de message
-                if data['type'] == 'player_state':
-                    self.update_player_state(player_id, data['state'])
+                if msg_type == 'player_state':
+                    self.update_player_state(player_id, data.get('state', {}))
                     
-                elif data['type'] == 'damage':
-                    self.game_state.shared_health -= data['amount']
+                elif msg_type == 'damage':
+                    amount = data.get('amount', 1)
+                    self.game_state.shared_health -= amount
                     self.broadcast({
                         'type': 'health_update',
                         'health': self.game_state.shared_health
@@ -132,13 +137,24 @@ class GameServer:
                     
                     if self.game_state.shared_health <= 0:
                         self.broadcast({'type': 'game_over'})
+                        break
                 
-                # Renvoie l'état complet du jeu
-                self.send_data(client_socket, {
-                    'type': 'game_state',
-                    'state': self.serialize_game_state()
-                })
+                elif msg_type == 'heartbeat':
+                    self.send_data(client_socket, {'type': 'heartbeat_ack'})
+                    continue
                 
+                # Renvoie l'état complet du jeu à ce joueur
+                try:
+                    self.send_data(client_socket, {
+                        'type': 'game_state',
+                        'state': self.serialize_game_state()
+                    })
+                except Exception as e:
+                    print(f"[SERVEUR] Erreur d'envoi game_state à joueur {player_id}: {e}")
+                    break
+                
+        except socket.timeout:
+            print(f"[SERVEUR] Timeout avec joueur {player_id}")
         except Exception as e:
             print(f"[SERVEUR] Erreur avec joueur {player_id}: {e}")
         finally:
@@ -164,66 +180,111 @@ class GameServer:
         }
     
     def broadcast(self, data: dict):
-        """Envoie un message à tous les clients"""
-        for client_socket in self.clients.values():
+        """Envoie un message à tous les clients connectés.
+        Ignore les erreurs d'envoi individuelles pour que un client en erreur
+        n'affecte pas les autres."""
+        dead_clients = []
+        for player_id, client_socket in list(self.clients.items()):
             try:
                 self.send_data(client_socket, data)
-            except:
-                pass
+            except Exception as e:
+                print(f"[SERVEUR] Erreur broadcast vers joueur {player_id}: {e}")
+                dead_clients.append(player_id)
+        
+        # Nettoie les clients morts
+        for player_id in dead_clients:
+            if player_id in self.clients:
+                try:
+                    self.clients[player_id].close()
+                except:
+                    pass
+                del self.clients[player_id]
+    
+    def _recv_exact(self, client_socket: socket.socket, n: int) -> Optional[bytes]:
+        """Lit exactement N octets depuis le socket (robuste)."""
+        data = b''
+        while len(data) < n:
+            try:
+                chunk = client_socket.recv(n - len(data))
+                if not chunk:
+                    return None
+                data += chunk
+            except socket.timeout:
+                if len(data) == 0:
+                    return None
+                continue
+            except Exception:
+                return None
+        return data
     
     def send_data(self, client_socket: socket.socket, data: dict):
         """Envoie des données via socket"""
         try:
             serialized = pickle.dumps(data)
-            # Envoie d'abord la taille, puis les données
             size = len(serialized)
+            if size > 1_000_000:
+                print(f"[SERVEUR] Payload trop gros: {size} bytes")
+                return
             client_socket.sendall(size.to_bytes(4, 'big'))
             client_socket.sendall(serialized)
-        except Exception as e:
-            print(f"[SERVEUR] Erreur d'envoi: {e}")
+        except OSError as e:
+            # Connexion déjà fermée (déconnexion normale) : pas de log bruyant
+            if self.running and getattr(e, "errno", None) not in (9, 32, 54, 104):
+                print(f"[SERVEUR] Erreur d'envoi: {e}")
     
     def receive_data(self, client_socket: socket.socket) -> Optional[dict]:
-        """Reçoit des données via socket"""
+        """Reçoit des données via socket (protocole: [4 bytes taille][payload pickle])"""
         try:
-            # Reçoit d'abord la taille
-            size_bytes = client_socket.recv(4)
+            size_bytes = self._recv_exact(client_socket, 4)
             if not size_bytes:
                 return None
             
             size = int.from_bytes(size_bytes, 'big')
+            if size <= 0 or size > 1_000_000:
+                print(f"[SERVEUR] Taille invalide reçue: {size}")
+                return None
             
-            # Reçoit les données
-            data = b''
-            while len(data) < size:
-                packet = client_socket.recv(min(size - len(data), 4096))
-                if not packet:
-                    return None
-                data += packet
+            payload = self._recv_exact(client_socket, size)
+            if not payload:
+                return None
             
-            return pickle.loads(data)
+            return pickle.loads(payload)
         except Exception as e:
             print(f"[SERVEUR] Erreur de réception: {e}")
             return None
     
     def disconnect_client(self, player_id: int, client_socket: socket.socket):
-        """Gère la déconnexion d'un client"""
+        """Gère la déconnexion d'un client proprement"""
         print(f"[SERVEUR] Joueur {player_id} déconnecté")
-        client_socket.close()
+        try:
+            client_socket.close()
+        except:
+            pass
+        
         if player_id in self.clients:
             del self.clients[player_id]
         
-        # Notifie l'autre joueur
-        self.broadcast({'type': 'player_disconnected', 'player_id': player_id})
+        # Notifie l'autre joueur si la partie est en cours
+        if len(self.clients) > 0:
+            self.broadcast({'type': 'player_disconnected', 'player_id': player_id})
     
     def shutdown(self):
         """Arrête proprement le serveur"""
         self.running = False
-        self.broadcast({'type': 'server_shutdown'})
+        self._beacon_running = False
+        if self.clients:
+            self.broadcast({'type': 'server_shutdown'})
         
         for client_socket in self.clients.values():
-            client_socket.close()
+            try:
+                client_socket.close()
+            except:
+                pass
         
-        self.server_socket.close()
+        try:
+            self.server_socket.close()
+        except:
+            pass
         print("[SERVEUR] Serveur arrêté.")
 
 if __name__ == "__main__":

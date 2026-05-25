@@ -95,7 +95,7 @@ class ClientReseau:
         try:
             self.sock.settimeout(timeout)
             self.sock.connect((self.host, self.PORT))
-            self.sock.settimeout(None)
+            self.sock.settimeout(5.0)  # Garde 5 sec timeout après connexion
 
             # Le serveur envoie immédiatement le player_id
             data = self._recevoir_bloquant()
@@ -106,6 +106,7 @@ class ClientReseau:
                 # Démarre le thread de réception en arrière-plan
                 t = threading.Thread(target=self._boucle_reception, daemon=True)
                 t.start()
+                print(f"[CLIENT] Connecté ! Player ID = {self.player_id}")
                 return True
         except Exception as e:
             print(f"[CLIENT] Erreur connexion à {self.host}:{self.PORT} → {e}")
@@ -120,19 +121,23 @@ class ClientReseau:
         """
         if not self.connecte:
             return
-        etat = {
-            'x':              joueur.x,
-            'y':              joueur.y,
-            'velocity_y':     joueur.vy,
-            'is_jumping':     not joueur.sur_sol,
-            'is_sliding':     joueur.slide,
-            'has_item':       False,
-            'animation_state': (
-                'slide' if joueur.slide
-                else ('jump' if not joueur.sur_sol else 'run')
-            ),
-        }
-        self._envoyer({'type': 'player_state', 'state': etat})
+        try:
+            etat = {
+                'x':              joueur.x,
+                'y':              joueur.y,
+                'velocity_y':     joueur.vy,
+                'is_jumping':     not joueur.sur_sol,
+                'is_sliding':     joueur.slide,
+                'has_item':       False,
+                'animation_state': (
+                    'slide' if joueur.slide
+                    else ('jump' if not joueur.sur_sol else 'run')
+                ),
+            }
+            self._envoyer({'type': 'player_state', 'state': etat})
+        except Exception as e:
+            print(f"[CLIENT] Erreur envoi état joueur: {e}")
+            self.connecte = False
 
     def get_etat_jeu(self) -> Optional[dict]:
         """
@@ -174,6 +179,7 @@ class ClientReseau:
         """
         Tourne en arrière-plan. Met à jour _dernier_etat_jeu à chaque message reçu.
         Gère également les messages spéciaux (game_start, game_over, déconnexion).
+        Les messages heartbeat_ack sont ignorés silencieusement (confirmé connexion).
         """
         while self._running:
             data = self._recevoir_bloquant()
@@ -184,7 +190,11 @@ class ClientReseau:
 
             msg_type = data.get('type')
 
-            if msg_type == 'game_start':
+            if msg_type == 'heartbeat_ack':
+                # Confirmation de vie du serveur - ignoré silencieusement
+                continue
+
+            elif msg_type == 'game_start':
                 self.seed = data.get('seed')
                 self.game_start_recu = True
                 print(f"[CLIENT] Partie lancée ! Seed = {self.seed}")
@@ -200,11 +210,33 @@ class ClientReseau:
         """Sérialise et envoie un message : [4 octets taille][payload pickle]."""
         try:
             payload = pickle.dumps(data)
-            self.sock.sendall(len(payload).to_bytes(4, 'big'))
+            size = len(payload)
+            if size > 1_000_000:
+                print(f"[CLIENT] Payload trop gros: {size} bytes")
+                self.connecte = False
+                return
+            self.sock.sendall(size.to_bytes(4, 'big'))
             self.sock.sendall(payload)
         except Exception as e:
             print(f"[CLIENT] Erreur envoi : {e}")
             self.connecte = False
+
+    def _recv_exact(self, n: int) -> Optional[bytes]:
+        """Lit exactement n octets depuis le socket (robuste TCP)."""
+        data = b''
+        while len(data) < n:
+            try:
+                chunk = self.sock.recv(n - len(data))
+                if not chunk:
+                    return None
+                data += chunk
+            except socket.timeout:
+                if len(data) == 0:
+                    return None
+                continue
+            except Exception:
+                return None
+        return data
 
     def _recevoir_bloquant(self) -> Optional[dict]:
         """
@@ -216,6 +248,9 @@ class ClientReseau:
             if not size_bytes:
                 return None
             size = int.from_bytes(size_bytes, 'big')
+            if size <= 0 or size > 1_000_000:
+                print(f"[CLIENT] Taille invalide: {size}")
+                return None
             payload = self._recv_exact(size)
             if not payload:
                 return None
@@ -224,13 +259,3 @@ class ClientReseau:
             if self._running:
                 print(f"[CLIENT] Erreur réception : {e}")
             return None
-
-    def _recv_exact(self, n: int) -> Optional[bytes]:
-        """Lit exactement n octets depuis le socket."""
-        data = b''
-        while len(data) < n:
-            chunk = self.sock.recv(n - len(data))
-            if not chunk:
-                return None
-            data += chunk
-        return data

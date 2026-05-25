@@ -24,7 +24,6 @@ Structure :
 import pygame
 import sys
 import os
-import cv2
 import json
 import math
 import subprocess
@@ -339,13 +338,16 @@ class MenuParametres:
         return None
 
     def get_config(self):
-        return {
+        cfg = {
             "largeur": RESOLUTIONS[self.resolution_index][0],
             "hauteur": RESOLUTIONS[self.resolution_index][1],
             "volume_musique": self.slider_musique.valeur / 100,
             "volume_sons": self.slider_sons.valeur / 100,
-            "resolution_index": self.resolution_index
+            "resolution_index": self.resolution_index,
         }
+        if LAYOUT_CLAVIER in ("azerty", "qwerty"):
+            cfg["layout_clavier"] = LAYOUT_CLAVIER
+        return cfg
 
     def dessiner(self, ecran, progression=1.0):
         largeur, hauteur = ecran.get_size()
@@ -765,7 +767,7 @@ _TOUS_NOEUDS_CARTE = [
     {"type": "level", "num": 4,    "nom": "Aquatic",  "couleur": (60,  150, 230), "pos_map": (0.37, 0.265)},
     # Personnage triangle attention (entre Aquatic et Boss)
     {"type": "bonus", "num": None, "nom": "⚠ Attention","couleur": (255, 210,  40), "pos_map": (0.36, 0.210)},
-    {"type": "level", "num": 5,    "nom": "Boss",     "couleur": (220,  60,  80), "pos_map": (0.36, 0.075)},
+    {"type": "level", "num": 5,    "nom": "Directeur Magnus", "couleur": (220,  60,  80), "pos_map": (0.36, 0.075), "boss": True},
 ]
 
 _VIES_PAR_DIFFICULTE = {"easy": 5, "medium": 3, "hard": 1}
@@ -816,16 +818,27 @@ def _dessiner_icone_difficulte(ecran, diff_id, cx, cy, couleur):
 
 def _dessiner_personnage_carte(ecran, x, y, couleur):
     """Petit personnage (fox style) affiché sur la carte du monde."""
-    # Corps
-    pygame.draw.rect(ecran, couleur, (x - 5, y - 6, 10, 12), border_radius=3)
-    # Tête
-    pygame.draw.circle(ecran, couleur, (x, y - 12), 7)
-    # Oreilles
-    pygame.draw.polygon(ecran, couleur, [(x - 6, y - 18), (x - 2, y - 12), (x - 8, y - 12)])
-    pygame.draw.polygon(ecran, couleur, [(x + 6, y - 18), (x + 2, y - 12), (x + 8, y - 12)])
-    # Yeux
-    pygame.draw.circle(ecran, (20, 20, 30), (x - 2, y - 13), 2)
-    pygame.draw.circle(ecran, (20, 20, 30), (x + 2, y - 13), 2)
+    col_clair = tuple(min(255, c + 40) for c in couleur)
+    # Corps arrondi
+    pygame.draw.ellipse(ecran, couleur, (x - 6, y - 4, 12, 14))
+    # Tête avec ombrage
+    pygame.draw.circle(ecran, couleur, (x, y - 13), 7)
+    pygame.draw.circle(ecran, col_clair, (x - 2, y - 15), 3)
+    # Oreilles pointues
+    pygame.draw.polygon(ecran, couleur, [(x - 6, y - 19), (x - 3, y - 13), (x - 8, y - 13)])
+    pygame.draw.polygon(ecran, couleur, [(x + 6, y - 19), (x + 3, y - 13), (x + 8, y - 13)])
+    # Intérieur des oreilles
+    pygame.draw.polygon(ecran, col_clair, [(x - 5, y - 18), (x - 3, y - 14), (x - 7, y - 14)])
+    pygame.draw.polygon(ecran, col_clair, [(x + 5, y - 18), (x + 3, y - 14), (x + 7, y - 14)])
+    # Yeux brillants
+    pygame.draw.circle(ecran, (240, 240, 240), (x - 2, y - 13), 2)
+    pygame.draw.circle(ecran, (240, 240, 240), (x + 2, y - 13), 2)
+    pygame.draw.circle(ecran, (20, 20, 30), (x - 2, y - 13), 1)
+    pygame.draw.circle(ecran, (20, 20, 30), (x + 2, y - 13), 1)
+    # Museau
+    pygame.draw.ellipse(ecran, col_clair, (x - 3, y - 8, 6, 4))
+    # Nez
+    pygame.draw.polygon(ecran, (20, 20, 30), [(x - 1, y - 7), (x + 1, y - 7), (x, y - 5)])
 
 
 def afficher_selection_difficulte(ecran, largeur, hauteur):
@@ -1003,11 +1016,61 @@ def afficher_popup(ecran, largeur, hauteur, message: str, couleur_titre=(255, 21
         pygame.display.flip()
 
 
-def afficher_selection_personnages(ecran, largeur, hauteur, nb_joueurs=2):
+def _perso_j2_auto(j1_index: int) -> int:
+    """Retourne un index de personnage différent de J1 pour l'IA."""
+    return (j1_index + 1) % len(PERSONNAGES)
+
+
+def _afficher_j2_ia_info(ecran, largeur, hauteur, j2_index: int):
+    """Écran de confirmation : J2 est piloté automatiquement par l'IA."""
+    horloge = pygame.time.Clock()
+    f_titre = pygame.font.SysFont(None, 48, bold=True)
+    f_nom = pygame.font.SysFont(None, 36, bold=True)
+    f_aide = pygame.font.SysFont(None, 24)
+    perso = PERSONNAGES[j2_index]
+    tick = 0
+
+    while True:
+        horloge.tick(FPS)
+        tick += 1
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                return
+            if event.type == pygame.KEYDOWN:
+                if event.key in (pygame.K_RETURN, pygame.K_SPACE, pygame.K_ESCAPE):
+                    return
+
+        ecran.fill((10, 12, 28))
+        titre = f_titre.render("Joueur 2 — IA automatique", True, (80, 160, 255))
+        ecran.blit(titre, titre.get_rect(center=(largeur // 2, 80)))
+
+        desc = f_aide.render("L'IA saute et esquive les obstacles toute seule", True, (140, 150, 170))
+        ecran.blit(desc, desc.get_rect(center=(largeur // 2, 130)))
+
+        bob = int(math.sin(tick * 0.12) * 5)
+        cx, cy = largeur // 2, hauteur // 2 - bob
+        col_body = perso["couleurs"][0]
+        _dessiner_personnage_carte(ecran, cx - 12, cy, col_body)
+
+        nom_surf = f_nom.render(perso["nom"], True, col_body)
+        ecran.blit(nom_surf, nom_surf.get_rect(center=(largeur // 2, cy + 70)))
+
+        badge = f_nom.render("IA", True, (0, 220, 255))
+        badge_rect = badge.get_rect(center=(largeur // 2, cy + 110))
+        pygame.draw.rect(ecran, (20, 40, 60), badge_rect.inflate(24, 12), border_radius=8)
+        ecran.blit(badge, badge_rect)
+
+        aide = f_aide.render("ENTRÉE  pour continuer", True, (110, 120, 140))
+        ecran.blit(aide, aide.get_rect(center=(largeur // 2, hauteur - 40)))
+        pygame.display.flip()
+
+
+def afficher_selection_personnages(ecran, largeur, hauteur, nb_joueurs=2, j2_ia=False):
     """
     Écran de sélection de personnage.
     nb_joueurs=1 → seul J1 choisit (mode solo_j1) ; J2 garde son perso par défaut.
     nb_joueurs=2 → J1 puis J2 choisissent.
+    j2_ia=True → J1 choisit, J2 est assigné automatiquement à l'IA (mode solo_ia).
     Retourne un dict avec couleurs, noms et dossiers sprite (personnage_j1/j2).
     Met à jour PERSO_J1_INDEX / PERSO_J2_INDEX globalement.
     """
@@ -1015,13 +1078,20 @@ def afficher_selection_personnages(ecran, largeur, hauteur, nb_joueurs=2):
     horloge = pygame.time.Clock()
 
     def _choisir(joueur_num: int, idx_depart: int) -> int:
-        """Sous-boucle pour un seul joueur. Retourne l'index choisi."""
+        """Sous-boucle pour un seul joueur. Retourne l'index choisi ou None si Escape."""
         idx = idx_depart
         f_titre = pygame.font.SysFont(None, 52, bold=True)
         f_nom   = pygame.font.SysFont(None, 36, bold=True)
         f_aide  = pygame.font.SysFont(None, 24)
         tick = 0
         couleur_j = (80, 220, 130) if joueur_num == 1 else (80, 160, 255)
+        
+        # Calculer les positions des cartes pour la détection de clic
+        nb = len(PERSONNAGES)
+        card_w, card_h = 130, 160
+        espacement = 20
+        total_w = nb * card_w + (nb - 1) * espacement
+        start_x = (largeur - total_w) // 2
 
         while True:
             horloge.tick(FPS)
@@ -1037,7 +1107,18 @@ def afficher_selection_personnages(ecran, largeur, hauteur, nb_joueurs=2):
                     elif event.key in (pygame.K_RETURN, pygame.K_SPACE):
                         return idx
                     elif event.key == pygame.K_ESCAPE:
-                        return idx
+                        return None
+                elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                    mx, my = event.pos
+                    cy_base = hauteur // 2 - card_h // 2
+                    for i in range(nb):
+                        cx = start_x + i * (card_w + espacement)
+                        bob = int(math.sin(tick * 0.12) * 5) if i == idx else 0
+                        cy = cy_base - bob
+                        if cx <= mx <= cx + card_w and cy <= my <= cy + card_h:
+                            if i == idx:
+                                return idx
+                            idx = i
 
             # Fond
             ecran.fill((10, 12, 28))
@@ -1086,14 +1167,21 @@ def afficher_selection_personnages(ecran, largeur, hauteur, nb_joueurs=2):
                 ecran.blit(nom_surf, nom_surf.get_rect(center=(cx + card_w // 2, cy + card_h - 22 - bob)))
 
             # Aide
-            aide = f_aide.render("← →  choisir     ENTRÉE  confirmer", True, (110, 120, 140))
+            aide = f_aide.render("← →  choisir     CLIC ou ENTRÉE  confirmer", True, (110, 120, 140))
             ecran.blit(aide, aide.get_rect(center=(largeur // 2, hauteur - 40)))
 
             pygame.display.flip()
 
     PERSO_J1_INDEX = _choisir(1, PERSO_J1_INDEX)
-    if nb_joueurs >= 2:
+    if PERSO_J1_INDEX is None:
+        return None
+    if j2_ia:
+        PERSO_J2_INDEX = _perso_j2_auto(PERSO_J1_INDEX)
+        _afficher_j2_ia_info(ecran, largeur, hauteur, PERSO_J2_INDEX)
+    elif nb_joueurs >= 2:
         PERSO_J2_INDEX = _choisir(2, PERSO_J2_INDEX)
+        if PERSO_J2_INDEX is None:
+            return None
 
     return {
         "couleurs_j1":    PERSONNAGES[PERSO_J1_INDEX]["couleurs"],
@@ -1105,7 +1193,7 @@ def afficher_selection_personnages(ecran, largeur, hauteur, nb_joueurs=2):
     }
 
 
-def afficher_carte_monde(ecran, largeur, hauteur, difficulte: str):
+def afficher_carte_monde(ecran, largeur, hauteur, difficulte: str, nb_joueurs=2, j2_ia=False):
     """
     Carte du monde style Mario Bros — pleine largeur, défilement vertical.
 
@@ -1201,7 +1289,9 @@ def afficher_carte_monde(ecran, largeur, hauteur, difficulte: str):
                     sel = max(0, sel - 1)
                 # P : sélection de personnage
                 if event.key == pygame.K_p:
-                    perso_info = afficher_selection_personnages(ecran, largeur, hauteur)
+                    perso_info = afficher_selection_personnages(
+                        ecran, largeur, hauteur, nb_joueurs=nb_joueurs, j2_ia=j2_ia,
+                    )
                     _perso_selection.update(perso_info)
                 if event.key in (pygame.K_RETURN, pygame.K_SPACE):
                     n = noeuds[sel]
@@ -1216,10 +1306,9 @@ def afficher_carte_monde(ecran, largeur, hauteur, difficulte: str):
                                        couleur_titre=(210, 150, 40))
                     elif "Attention" in n["nom"]:
                         afficher_popup(ecran, largeur, hauteur,
-                                       "Attention vous êtes arrivés au niveau final, afin de vous "
-                                       "échapper pour de bon vous devez vaincre le boss du zoo, le "
-                                       "travail d'équipe et la coordination seront nécessaires plus "
-                                       "que jamais !",
+                                       "Attention ! Le Directeur Magnus vous attend dans son arène. "
+                                       "Esquivez ses attaques ensemble — chaque vague sans dégât "
+                                       "l'affaiblit. Vainquez-le pour vous échapper du zoo !",
                                        couleur_titre=(255, 80, 80))
 
             if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
@@ -1285,8 +1374,13 @@ def afficher_carte_monde(ecran, largeur, hauteur, difficulte: str):
                 pygame.draw.circle(ecran, (0, 0, 0),  (px + 3, py - bob + 4), r)
                 pygame.draw.circle(ecran, col,         (px,     py - bob),     r)
                 pygame.draw.circle(ecran, BLANC,       (px,     py - bob),     r, 2)
-                num_surf = f_num.render(str(n["num"]), True, (15, 15, 25))
-                ecran.blit(num_surf, num_surf.get_rect(center=(px, py - bob)))
+                if n.get("boss"):
+                    f_boss = pygame.font.SysFont(None, 26, bold=True)
+                    skull = f_boss.render("☠", True, (255, 230, 230))
+                    ecran.blit(skull, skull.get_rect(center=(px, py - bob)))
+                else:
+                    num_surf = f_num.render(str(n["num"]), True, (15, 15, 25))
+                    ecran.blit(num_surf, num_surf.get_rect(center=(px, py - bob)))
 
             # Nom à droite du nœud
             nom_col  = col if est_sel else (210, 215, 225)
@@ -1339,6 +1433,8 @@ def afficher_carte_monde(ecran, largeur, hauteur, difficulte: str):
                 f"Vitesse : {cfg_preview.get('vitesse', '?'):.1f}",
                 f"Vies : {cfg_preview.get('vies', '?')}",
             ]
+            if cfg_preview.get("mode_boss"):
+                stats.append("Mini-boss")
             stat_x = 200
             for s in stats:
                 s_surf = f_stat.render(s, True, (190, 200, 220))
@@ -1391,14 +1487,14 @@ def afficher_selection_mode(ecran, largeur, hauteur):
             "id": "solo_ia",
             "titre": "SOLO + IA",
             "desc1": "1 joueur au clavier",
-            "desc2": "J2 géré par l'IA",
+            "desc2": "J2 piloté par l'IA",
             "couleur": (80, 220, 130),   # vert
         },
         {
             "id": "local",
             "titre": "LOCAL",
             "desc1": "2 joueurs, 1 PC",
-            "desc2": "J1: Z/S   J2: ↑/↓",
+            "desc2": None,  # rempli dynamiquement selon le layout clavier
             "couleur": (100, 180, 255),  # bleu
         },
         {
@@ -1491,12 +1587,18 @@ def afficher_selection_mode(ecran, largeur, hauteur):
             # Description
             f_desc = pygame.font.SysFont(None, 24)
             col_txt = BLANC if est_sel else (140, 150, 170)
+            desc2 = mode["desc2"]
+            if desc2 is None and mode["id"] == "local":
+                k_haut = "W" if LAYOUT_CLAVIER == "qwerty" else "Z"
+                desc2 = f"J1: {k_haut}/S   J2: IA ou ↑/↓"
+            desc2 = desc2 or ""
             ecran.blit(f_desc.render(mode["desc1"], True, col_txt),
                        f_desc.render(mode["desc1"], True, col_txt)
                        .get_rect(center=(cx + card_w // 2, cy + 158)))
-            ecran.blit(f_desc.render(mode["desc2"], True, col_txt),
-                       f_desc.render(mode["desc2"], True, col_txt)
-                       .get_rect(center=(cx + card_w // 2, cy + 180)))
+            if desc2:
+                ecran.blit(f_desc.render(desc2, True, col_txt),
+                           f_desc.render(desc2, True, col_txt)
+                           .get_rect(center=(cx + card_w // 2, cy + 180)))
 
             # Badge JOUER
             if est_sel:
@@ -1557,7 +1659,9 @@ def afficher_ecran_reseau(ecran, largeur, hauteur):
       - HÉBERGER : lance le serveur en sous-processus et attend la connexion sur localhost.
       - REJOINDRE : scanne le LAN via UDP beacon et affiche la liste des parties disponibles.
 
-    Retourne (client, player_id) si la connexion réussit, ou None si annulé.
+    Retourne (client, player_id, processus_serveur) si la connexion réussit.
+    processus_serveur est non-None uniquement si ce PC a lancé le serveur (Héberger).
+    Retourne None si annulé.
     """
     import time as _time
 
@@ -1648,7 +1752,7 @@ def afficher_ecran_reseau(ecran, largeur, hauteur):
                                 _time.sleep(0.8)
                                 result = _tenter_connexion("127.0.0.1")
                                 if result:
-                                    return result
+                                    return (*result, processus_serveur)
                                 message_erreur = "Serveur non démarré — réessaie"
                                 erreur_timer = 180
                                 processus_serveur.terminate()
@@ -1665,7 +1769,7 @@ def afficher_ecran_reseau(ecran, largeur, hauteur):
                             _time.sleep(0.8)
                             result = _tenter_connexion("127.0.0.1")
                             if result:
-                                return result
+                                return (*result, processus_serveur)
                             message_erreur = "Serveur non démarré — réessaie"
                             erreur_timer = 180
                             processus_serveur.terminate()
@@ -1691,7 +1795,7 @@ def afficher_ecran_reseau(ecran, largeur, hauteur):
                             if ligne_rect.collidepoint(pos):
                                 result = _tenter_connexion(jeu_info['ip'])
                                 if result:
-                                    return result
+                                    return (*result, None)
                                 message_erreur = f"Impossible de rejoindre {jeu_info['nom']}"
                                 erreur_timer = 180
 
@@ -1896,20 +2000,30 @@ def lancer_partie(dossier_courant, menu_params):
         _retour(); return
 
     # ── Étape 1b : sélection des personnages ─────────────────────────────────
-    nb_joueurs = 1 if mode == "solo_j1" else 2
-    perso_info = afficher_selection_personnages(ecran, w, h, nb_joueurs=nb_joueurs)
+    j2_ia = (mode == "solo_ia")
+    nb_joueurs = 1 if mode in ("solo_j1", "solo_ia") else 2
+    perso_info = afficher_selection_personnages(
+        ecran, w, h, nb_joueurs=nb_joueurs, j2_ia=j2_ia,
+    )
+    if perso_info is None:
+        _retour(); return
 
     # ── Étape 2 : setup réseau ───────────────────────────────────────────────
     client = None
     player_id = 0
     seed = None
 
+    processus_serveur = None
     if mode == "reseau":
         result = afficher_ecran_reseau(ecran, w, h)
         if result is None:
             _retour(); return
-        client, player_id = result
+        client, player_id, processus_serveur = result
         if not afficher_attente_connexion(ecran, w, h, client):
+            if client:
+                client.fermer()
+            if processus_serveur:
+                processus_serveur.terminate()
             _retour(); return
         seed = client.seed
 
@@ -1922,14 +2036,18 @@ def lancer_partie(dossier_courant, menu_params):
     if difficulte == "test":
         config_niveau = dict(jeu.NIVEAUX[0], _numero=0)
     else:
-        config_niveau = afficher_carte_monde(ecran, w, h, difficulte)
+        config_niveau = afficher_carte_monde(
+            ecran, w, h, difficulte, nb_joueurs=nb_joueurs, j2_ia=j2_ia,
+        )
         if config_niveau is None:
             if client: client.fermer()
             _retour(); return
 
     # ── Force les options selon le mode ──────────────────────────────────────
     config_niveau = dict(config_niveau)
-    config_niveau["ai_j2"]        = (mode == "solo_ia")
+    # IA J2 : solo+IA toujours ; en local elle aide tant que personne n'utilise ↑/↓
+    config_niveau["ai_j2"]        = mode in ("solo_ia", "local")
+    config_niveau["j2_force_ia"]  = j2_ia
     config_niveau["solo_j1"]      = (mode == "solo_j1")
     config_niveau["controles_j1"] = (K_J1_HAUT, pygame.K_s)
     # Personnages : priorité à la sélection faite sur la carte (si elle est là), sinon sélection initiale
@@ -1943,14 +2061,23 @@ def lancer_partie(dossier_courant, menu_params):
             return None
         if diff == "test":
             return dict(jeu.NIVEAUX[0], _numero=0)
-        return afficher_carte_monde(ecran, w, h, diff)
+        return afficher_carte_monde(
+            ecran, w, h, diff, nb_joueurs=nb_joueurs, j2_ia=j2_ia,
+        )
 
-    jeu.lancer_jeu(ecran, config_niveau, client_reseau=client,
-                   player_id=player_id, seed=seed,
-                   get_nouveau_niveau=get_nouveau_niveau)
-
-    if client:
-        client.fermer()
+    try:
+        jeu.lancer_jeu(ecran, config_niveau, client_reseau=client,
+                       player_id=player_id, seed=seed,
+                       get_nouveau_niveau=get_nouveau_niveau)
+    finally:
+        if client:
+            client.fermer()
+        if processus_serveur and processus_serveur.poll() is None:
+            processus_serveur.terminate()
+            try:
+                processus_serveur.wait(timeout=2)
+            except subprocess.TimeoutExpired:
+                processus_serveur.kill()
 
     # ── Étape 5 : restauration du menu ───────────────────────────────────────
     _retour()
@@ -1994,6 +2121,7 @@ def afficher_menu():
     charger_musique(dossier_courant)
     
     chemin_video = os.path.join(dossier_courant, "assets", "background.mp4")
+    import cv2  # import tardif : évite le conflit SDL avec pygame sur macOS
     cap = cv2.VideoCapture(chemin_video)
     video_marche = cap.isOpened()
     
@@ -2008,9 +2136,13 @@ def afficher_menu():
     except:
         image_logo = None
 
-    # Sélection du layout clavier à chaque lancement
-    layout = afficher_selection_clavier(ecran, LARGEUR, HAUTEUR)
-    _appliquer_layout(layout)
+    # Sélection du layout clavier au premier lancement uniquement
+    layout_sauve = CONFIG.get("layout_clavier")
+    if layout_sauve in ("azerty", "qwerty"):
+        _appliquer_layout(layout_sauve)
+    else:
+        layout = afficher_selection_clavier(ecran, LARGEUR, HAUTEUR)
+        _appliquer_layout(layout)
 
     menu_params = MenuParametres(CONFIG)
 
