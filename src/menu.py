@@ -102,15 +102,17 @@ def _appliquer_layout(layout: str) -> None:
 
 # ── Personnages jouables ────────────────────────────────────────────────────────
 PERSONNAGES = [
-    {"nom": "Fox",      "dossier": "Fox",   "couleurs": ((225, 120,  90), (255, 170, 140))},
-    {"nom": "Raton",    "dossier": "Raton", "couleurs": ((140, 150, 170), (200, 210, 225))},
-    {"nom": "Lion",     "dossier": "Fox",   "couleurs": ((230, 180,  60), (255, 220, 120))},
-    {"nom": "Penguin",  "dossier": "Fox",   "couleurs": ((60,   80, 120), (120, 140, 180))},
-    {"nom": "Parrot",   "dossier": "Fox",   "couleurs": ((80,  200, 100), (140, 230, 150))},
-    {"nom": "Shark",    "dossier": "Fox",   "couleurs": ((60,  150, 230), (120, 190, 255))},
+    {"nom": "Fox",     "dossier": "Fox",     "couleurs": ((225, 120,  90), (255, 170, 140))},
+    {"nom": "Raton",   "dossier": "Raton",   "couleurs": ((140, 150, 170), (200, 210, 225))},
+    {"nom": "Shark",   "dossier": "Shark",   "couleurs": ((60,  150, 230), (120, 190, 255))},
+    {"nom": "Parrot",  "dossier": "Parrot",  "couleurs": ((80,  200, 100), (140, 230, 150))},
+    {"nom": "Lion",    "dossier": "Lion",    "couleurs": ((230, 180,  60), (255, 220, 120))},
+    {"nom": "Penguin", "dossier": "Penguin", "couleurs": ((60,   80, 120), (120, 140, 180))},
 ]
 PERSO_J1_INDEX = 0
 PERSO_J2_INDEX = 1
+
+_PERSO_PREVIEW_CACHE = {}
 
 pygame.display.set_caption("Zoo Escape - Menu Principal")
 
@@ -841,6 +843,48 @@ def _dessiner_personnage_carte(ecran, x, y, couleur):
     pygame.draw.polygon(ecran, (20, 20, 30), [(x - 1, y - 7), (x + 1, y - 7), (x, y - 5)])
 
 
+def _charger_apercu_personnage(dossier, hauteur_cible=72):
+    """Première frame de course, redimensionnée pour l'UI de sélection."""
+    if dossier in _PERSO_PREVIEW_CACHE:
+        return _PERSO_PREVIEW_CACHE[dossier]
+
+    src_dir = os.path.join(os.path.dirname(__file__), "assets", dossier, "Courir_animation")
+    if not os.path.isdir(src_dir):
+        _PERSO_PREVIEW_CACHE[dossier] = None
+        return None
+
+    fichiers = sorted(
+        [n for n in os.listdir(src_dir) if n.lower().endswith(".png")],
+        key=lambda n: int("".join(c for c in n if c.isdigit()) or "999"),
+    )
+    if not fichiers:
+        _PERSO_PREVIEW_CACHE[dossier] = None
+        return None
+
+    frame = pygame.image.load(os.path.join(src_dir, fichiers[0])).convert_alpha()
+    w, h = frame.get_size()
+    if h <= 0:
+        _PERSO_PREVIEW_CACHE[dossier] = None
+        return None
+    scale = hauteur_cible / h
+    preview = pygame.transform.smoothscale(
+        frame, (max(1, int(w * scale)), hauteur_cible)
+    )
+    _PERSO_PREVIEW_CACHE[dossier] = preview
+    return preview
+
+
+def _dessiner_apercu_personnage(ecran, x, y, perso):
+    """Aperçu sprite si disponible, sinon silhouette générique."""
+    preview = _charger_apercu_personnage(perso["dossier"])
+    if preview is not None:
+        rect = preview.get_rect()
+        rect.midbottom = (x + 12, y + 52)
+        ecran.blit(preview, rect)
+        return
+    _dessiner_personnage_carte(ecran, x, y, perso["couleurs"][0])
+
+
 def afficher_selection_difficulte(ecran, largeur, hauteur):
     """
     Écran de sélection de difficulté : TEST / EASY / MEDIUM / HARD.
@@ -1050,7 +1094,7 @@ def _afficher_j2_ia_info(ecran, largeur, hauteur, j2_index: int):
         bob = int(math.sin(tick * 0.12) * 5)
         cx, cy = largeur // 2, hauteur // 2 - bob
         col_body = perso["couleurs"][0]
-        _dessiner_personnage_carte(ecran, cx - 12, cy, col_body)
+        _dessiner_apercu_personnage(ecran, cx - 12, cy, perso)
 
         nom_surf = f_nom.render(perso["nom"], True, col_body)
         ecran.blit(nom_surf, nom_surf.get_rect(center=(largeur // 2, cy + 70)))
@@ -1156,8 +1200,10 @@ def afficher_selection_personnages(ecran, largeur, hauteur, nb_joueurs=2, j2_ia=
                 pygame.draw.rect(ecran, bg_col, (cx, cy - bob, card_w, card_h), border_radius=12)
                 pygame.draw.rect(ecran, border_col, (cx, cy - bob, card_w, card_h), 2, border_radius=12)
 
-                # Mini personnage dessiné
-                _dessiner_personnage_carte(ecran, cx + card_w // 2 - 12, cy + 40 - bob, col_body)
+                # Aperçu sprite du personnage
+                _dessiner_apercu_personnage(
+                    ecran, cx + card_w // 2 - 12, cy + 40 - bob, perso
+                )
 
                 # Pastille couleur
                 pygame.draw.circle(ecran, col_high, (cx + card_w // 2, cy + 90 - bob), 8)
@@ -1395,8 +1441,10 @@ def afficher_carte_monde(ecran, largeur, hauteur, difficulte: str, nb_joueurs=2,
         bob_char = int(math.sin(tick * 0.20) * 3)
         cx_scr = int(char_x)
         cy_scr = int(char_y) - cam_int
-        _dessiner_personnage_carte(ecran, cx_scr - 16, cy_scr - bob_char,     _perso_selection["couleurs_j1"][0])
-        _dessiner_personnage_carte(ecran, cx_scr + 5,  cy_scr - bob_char + 2, _perso_selection["couleurs_j2"][0])
+        j1 = next(p for p in PERSONNAGES if p["dossier"] == _perso_selection["personnage_j1"])
+        j2 = next(p for p in PERSONNAGES if p["dossier"] == _perso_selection["personnage_j2"])
+        _dessiner_apercu_personnage(ecran, cx_scr - 16, cy_scr - bob_char, j1)
+        _dessiner_apercu_personnage(ecran, cx_scr + 5, cy_scr - bob_char + 2, j2)
 
         # 4. Barre titre (haut)
         bar_top = pygame.Surface((largeur, BAR_TOP_H), pygame.SRCALPHA)

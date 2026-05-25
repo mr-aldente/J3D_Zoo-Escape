@@ -122,7 +122,8 @@ def column_slices(sheet: pygame.Surface, row: pygame.Rect, frame_count: int) -> 
             gaps.append((start, end, width, mid))
 
     if len(gaps) >= needed:
-        picked = sorted(sorted(gaps, key=lambda g: g[2], reverse=True)[:needed], key=lambda g: g[3])
+        # Use left-to-right gaps (not widest) so frame order matches the sheet.
+        picked = sorted(gaps, key=lambda g: g[3])[:needed]
         rects = []
         for i in range(frame_count):
             x0 = left if i == 0 else picked[i - 1][1] + 1

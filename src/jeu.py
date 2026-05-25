@@ -30,8 +30,12 @@ FPS = 144
 
 # Frames attendues par personnage (dossiers assets/{dossier}/)
 PERSONNAGE_ANIM = {
-    "Fox":   {"run": 6, "jump": 5, "slide": 5},
-    "Raton": {"run": 6, "jump": 5, "slide": 4},
+    "Fox":     {"run": 6, "jump": 5, "slide": 5},
+    "Raton":   {"run": 6, "jump": 5, "slide": 4},
+    "Shark":   {"run": 6, "jump": 6, "slide": 4},
+    "Parrot":  {"run": 6, "jump": 6, "slide": 4},
+    "Lion":    {"run": 6, "jump": 6, "slide": 4},
+    "Penguin": {"run": 6, "jump": 6, "slide": 4},
 }
 
 # Couleurs
@@ -1502,7 +1506,7 @@ class Joueur:
                     if self.animation_timer >= self.vitesse_animation_slide:
                         self.animation_timer = 0
                         if self.index_frame < len(self.sliding_frames) - 1:
-                            self.index_frame += 1  # joue jusqu'à la dernière frame, puis freeze
+                            self.index_frame += 1
             elif self.sur_sol:
                 if self.current_animation is not self.running_frames:
                     self.current_animation = self.running_frames
