@@ -2,7 +2,7 @@
 # Prerequis : gh auth login
 
 $ErrorActionPreference = "Stop"
-$Version = "v1.0.0"
+$Version = "v1.0.1"
 $Repo = "mr-aldente/J3D_Zoo-Escape"
 $Setup = Join-Path $PSScriptRoot "output\ZooEscape_Setup.exe"
 

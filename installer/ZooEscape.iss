@@ -2,7 +2,7 @@
 ; Compiler avec Inno Setup 6+ : iscc installer\ZooEscape.iss
 
 #define MyAppName "Zoo Escape"
-#define MyAppVersion "1.0.0"
+#define MyAppVersion "1.0.1"
 #define MyAppPublisher "Zoo Escape — Projet J3D EPITA"
 #define MyAppURL "https://j3d-zoo-escape.onrender.com"
 #define MyAppExeName "ZooEscape.exe"
@@ -90,18 +90,5 @@ Type: filesandordirs; Name: "{app}\website"
 Type: filesandordirs; Name: "{app}\sources"
 Type: filesandordirs; Name: "{app}\server"
 
-[Code]
-function InitializeSetup(): Boolean;
-begin
-  if not FileExists(ExpandConstant('{#DistDir}\{#MyAppExeName}')) then
-  begin
-    MsgBox(
-      'Le fichier ZooEscape.exe est introuvable.' + #13#10 +
-      'Exécutez d''abord : installer\build.ps1' + #13#10 +
-      '(PyInstaller puis compilation Inno Setup)',
-      mbError, MB_OK);
-    Result := False;
-  end
-  else
-    Result := True;
-end;
+; Pas de [Code] InitializeSetup : ne pas tester dist\ sur le PC de l'utilisateur.
+; ISCC echoue deja a la compilation si ZooEscape.exe manque dans installer\dist\.
