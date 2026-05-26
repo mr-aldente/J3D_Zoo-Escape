@@ -1253,6 +1253,143 @@ def afficher_selection_personnages(ecran, largeur, hauteur, nb_joueurs=2, j2_ia=
     }
 
 
+def _perso_par_dossier(dossier: str) -> dict:
+    for p in PERSONNAGES:
+        if p["dossier"] == dossier:
+            return p
+    return PERSONNAGES[0]
+
+
+def _config_persos_reseau(dossier_j1: str, dossier_j2: str) -> dict:
+    p1 = _perso_par_dossier(dossier_j1)
+    p2 = _perso_par_dossier(dossier_j2)
+    return {
+        "couleurs_j1": p1["couleurs"],
+        "nom_j1": p1["nom"],
+        "personnage_j1": p1["dossier"],
+        "couleurs_j2": p2["couleurs"],
+        "nom_j2": p2["nom"],
+        "personnage_j2": p2["dossier"],
+    }
+
+
+def afficher_lobby_reseau_personnages(ecran, largeur, hauteur, client):
+    """
+    Lobby réseau :
+      - chaque joueur choisit uniquement son propre personnage ;
+      - on attend que les deux choix soient prêts avant de continuer.
+    Retourne le dict de persos final (j1+j2) ou None si annulation/déconnexion.
+    """
+    horloge = pygame.time.Clock()
+    tick = 0
+    idx = PERSO_J1_INDEX if client.player_id == 0 else PERSO_J2_INDEX
+    nb = len(PERSONNAGES)
+    card_w, card_h = 130, 160
+    espacement = 20
+    total_w = nb * card_w + (nb - 1) * espacement
+    start_x = (largeur - total_w) // 2
+    dernier_envoi = None
+
+    while True:
+        horloge.tick(FPS)
+        tick += 1
+
+        if not _reseau_menu_tick(client):
+            return None
+
+        perso_local = PERSONNAGES[idx]["dossier"]
+        if perso_local != dernier_envoi:
+            if not client.envoyer_lobby_char(perso_local):
+                return None
+            dernier_envoi = perso_local
+
+        lobby = client.get_lobby_state() or {}
+        chars = lobby.get("chars", {})
+        d1 = chars.get(0) or chars.get("0")
+        d2 = chars.get(1) or chars.get("1")
+        both_ready = bool(d1 and d2)
+
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                return None
+            if event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_ESCAPE:
+                    return None
+                if event.key in (pygame.K_LEFT, K_MENU_GAUCHE):
+                    idx = (idx - 1) % nb
+                elif event.key in (pygame.K_RIGHT, pygame.K_d):
+                    idx = (idx + 1) % nb
+                elif event.key in (pygame.K_RETURN, pygame.K_SPACE) and both_ready:
+                    return _config_persos_reseau(d1, d2)
+            elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                mx, my = event.pos
+                cy_base = hauteur // 2 - card_h // 2
+                for i in range(nb):
+                    cx = start_x + i * (card_w + espacement)
+                    bob = int(math.sin(tick * 0.12) * 5) if i == idx else 0
+                    cy = cy_base - bob
+                    if cx <= mx <= cx + card_w and cy <= my <= cy + card_h:
+                        idx = i
+
+        ecran.fill((10, 12, 28))
+        f_titre = pygame.font.SysFont(None, 48, bold=True)
+        role = "Hôte (J1)" if client.player_id == 0 else "Client (J2)"
+        titre = f_titre.render(f"Lobby réseau — {role}", True, JAUNE_LOGO)
+        ecran.blit(titre, titre.get_rect(center=(largeur // 2, 72)))
+
+        f_sub = pygame.font.SysFont(None, 26)
+        ecran.blit(
+            f_sub.render("Choisis TON personnage. Le niveau sera choisi par l'hôte.", True, (170, 180, 200)),
+            f_sub.render("Choisis TON personnage. Le niveau sera choisi par l'hôte.", True, (170, 180, 200)).get_rect(center=(largeur // 2, 106))
+        )
+
+        for i, perso in enumerate(PERSONNAGES):
+            cx = start_x + i * (card_w + espacement)
+            cy = hauteur // 2 - card_h // 2
+            est_sel = (i == idx)
+            col_body = perso["couleurs"][0]
+            bob = int(math.sin(tick * 0.12) * 5) if est_sel else 0
+
+            pygame.draw.rect(ecran, (28, 34, 60) if est_sel else (18, 22, 40), (cx, cy - bob, card_w, card_h), border_radius=12)
+            pygame.draw.rect(ecran, col_body if est_sel else (50, 55, 80), (cx, cy - bob, card_w, card_h), 2, border_radius=12)
+            _dessiner_apercu_personnage(ecran, cx + card_w // 2 - 12, cy + 40 - bob, perso)
+            nom = pygame.font.SysFont(None, 28, bold=True).render(perso["nom"], True, col_body if est_sel else (180, 190, 210))
+            ecran.blit(nom, nom.get_rect(center=(cx + card_w // 2, cy + card_h - 20 - bob)))
+
+        f_state = pygame.font.SysFont(None, 28)
+        j1_nom = _perso_par_dossier(d1)["nom"] if d1 else "..."
+        j2_nom = _perso_par_dossier(d2)["nom"] if d2 else "..."
+        status = f"J1: {j1_nom}   |   J2: {j2_nom}"
+        ecran.blit(f_state.render(status, True, (120, 200, 255)), f_state.render(status, True, (120, 200, 255)).get_rect(center=(largeur // 2, hauteur - 86)))
+        msg = "ENTRÉE pour continuer" if both_ready else "En attente du choix de l'autre joueur..."
+        ecran.blit(f_state.render(msg, True, (140, 170, 190)), f_state.render(msg, True, (140, 170, 190)).get_rect(center=(largeur // 2, hauteur - 54)))
+        pygame.display.flip()
+
+
+def attendre_niveau_hote_reseau(ecran, largeur, hauteur, client):
+    """Écran d'attente du niveau choisi par l'hôte."""
+    horloge = pygame.time.Clock()
+    while True:
+        horloge.tick(FPS)
+        if not _reseau_menu_tick(client):
+            return None
+        cfg = client.consume_lobby_level()
+        if isinstance(cfg, dict):
+            return cfg
+
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                return None
+            if event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
+                return None
+
+        _fond_degrade(ecran, largeur, hauteur)
+        f = pygame.font.SysFont(None, 46, bold=True)
+        ecran.blit(f.render("En attente du niveau de l'hôte...", True, JAUNE_LOGO),
+                   f.render("En attente du niveau de l'hôte...", True, JAUNE_LOGO).get_rect(center=(largeur // 2, hauteur // 2)))
+        pygame.display.flip()
+
+
 def afficher_carte_monde(ecran, largeur, hauteur, difficulte: str, nb_joueurs=2, j2_ia=False, client_reseau=None):
     """
     Carte du monde style Mario Bros — pleine largeur, défilement vertical.
@@ -2192,11 +2329,13 @@ def lancer_partie(dossier_courant, menu_params):
     # ── Étape 1b : sélection des personnages ─────────────────────────────────
     j2_ia = (mode == "solo_ia")
     nb_joueurs = 1 if mode in ("solo_j1", "solo_ia") else 2
-    perso_info = afficher_selection_personnages(
-        ecran, w, h, nb_joueurs=nb_joueurs, j2_ia=j2_ia,
-    )
-    if perso_info is None:
-        _retour(); return
+    perso_info = None
+    if mode != "reseau":
+        perso_info = afficher_selection_personnages(
+            ecran, w, h, nb_joueurs=nb_joueurs, j2_ia=j2_ia,
+        )
+        if perso_info is None:
+            _retour(); return
 
     # ── Étape 2 : setup réseau ───────────────────────────────────────────────
     client = None
@@ -2220,22 +2359,34 @@ def lancer_partie(dossier_courant, menu_params):
             _retour(); return
         seed = client.seed
 
-    # ── Étape 3 : difficulté puis niveau ─────────────────────────────────────
-    difficulte = afficher_selection_difficulte(ecran, w, h, client_reseau=client)
-    if difficulte is None:
-        if client: client.fermer()
-        _retour(); return
+        perso_info = afficher_lobby_reseau_personnages(ecran, w, h, client)
+        if perso_info is None:
+            if client:
+                client.fermer()
+            _retour(); return
 
-    if difficulte == "test":
-        config_niveau = dict(jeu.NIVEAUX[0], _numero=0)
-    else:
-        config_niveau = afficher_carte_monde(
-            ecran, w, h, difficulte, nb_joueurs=nb_joueurs, j2_ia=j2_ia,
-            client_reseau=client,
-        )
+    # ── Étape 3 : difficulté puis niveau ─────────────────────────────────────
+    if mode == "reseau" and player_id == 1:
+        config_niveau = attendre_niveau_hote_reseau(ecran, w, h, client)
         if config_niveau is None:
             if client: client.fermer()
             _retour(); return
+    else:
+        difficulte = afficher_selection_difficulte(ecran, w, h, client_reseau=client)
+        if difficulte is None:
+            if client: client.fermer()
+            _retour(); return
+
+        if difficulte == "test":
+            config_niveau = dict(jeu.NIVEAUX[0], _numero=0)
+        else:
+            config_niveau = afficher_carte_monde(
+                ecran, w, h, difficulte, nb_joueurs=nb_joueurs, j2_ia=j2_ia,
+                client_reseau=client,
+            )
+            if config_niveau is None:
+                if client: client.fermer()
+                _retour(); return
 
     # ── Force les options selon le mode ──────────────────────────────────────
     config_niveau = dict(config_niveau)
@@ -2245,11 +2396,19 @@ def lancer_partie(dossier_courant, menu_params):
     config_niveau["solo_j1"]      = (mode == "solo_j1")
     config_niveau["controles_j1"] = (K_J1_HAUT, pygame.K_s)
     # Personnages : priorité à la sélection faite sur la carte (si elle est là), sinon sélection initiale
-    if "couleurs_j1" not in config_niveau:
+    if perso_info:
         config_niveau.update(perso_info)
+
+    # En réseau, l'hôte diffuse la config finale aux deux PCs.
+    if mode == "reseau" and player_id == 0:
+        if not client.envoyer_lobby_level(config_niveau):
+            client.fermer()
+            _retour(); return
 
     # ── Étape 4 : lancement du jeu ───────────────────────────────────────────
     def get_nouveau_niveau():
+        if mode == "reseau":
+            return None
         diff = afficher_selection_difficulte(ecran, w, h, client_reseau=client)
         if diff is None:
             return None

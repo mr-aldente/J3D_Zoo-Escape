@@ -99,6 +99,8 @@ class ClientReseau:
         self.connecte = False
         self.game_start_recu = False
         self._dernier_etat_jeu: Optional[dict] = None
+        self._dernier_lobby: Optional[dict] = None
+        self._niveau_reseau: Optional[dict] = None
         self._lock = threading.Lock()
         self._running = False
         self._heartbeat_tick = 0
@@ -191,6 +193,30 @@ class ClientReseau:
             print(f"[CLIENT] Erreur envoi état joueur: {e}")
             self.connecte = False
 
+    def envoyer_lobby_char(self, personnage: str) -> bool:
+        """Envoie au serveur le personnage choisi localement."""
+        if not self.connecte:
+            return False
+        try:
+            self._envoyer({'type': 'lobby_char', 'personnage': personnage})
+            return True
+        except Exception as e:
+            print(f"[CLIENT] Erreur envoi lobby_char: {e}")
+            self.connecte = False
+            return False
+
+    def envoyer_lobby_level(self, config_niveau: dict) -> bool:
+        """Host uniquement : diffuse le niveau/difficulté retenu aux deux joueurs."""
+        if not self.connecte:
+            return False
+        try:
+            self._envoyer({'type': 'lobby_level', 'config': config_niveau})
+            return True
+        except Exception as e:
+            print(f"[CLIENT] Erreur envoi lobby_level: {e}")
+            self.connecte = False
+            return False
+
     def get_etat_jeu(self) -> Optional[dict]:
         """
         Retourne le dernier état de jeu reçu du serveur (thread-safe).
@@ -213,6 +239,18 @@ class ClientReseau:
         # player_id 0 → on est J1 → on veut les données de J2, et inversement
         cle = 'player2' if self.player_id == 0 else 'player1'
         return state.get(cle)
+
+    def get_lobby_state(self) -> Optional[dict]:
+        """Retourne le dernier état de lobby (personnages choisis)."""
+        with self._lock:
+            return self._dernier_lobby
+
+    def consume_lobby_level(self) -> Optional[dict]:
+        """Récupère puis efface le niveau réseau reçu de l'hôte."""
+        with self._lock:
+            cfg = self._niveau_reseau
+            self._niveau_reseau = None
+        return cfg
 
     # ── Déconnexion ────────────────────────────────────────────────────────────
 
@@ -250,6 +288,16 @@ class ClientReseau:
                 self.seed = data.get('seed')
                 self.game_start_recu = True
                 print(f"[CLIENT] Partie lancée ! Seed = {self.seed}")
+
+            elif msg_type == 'lobby_state':
+                with self._lock:
+                    self._dernier_lobby = data
+
+            elif msg_type == 'lobby_level':
+                cfg = data.get('config')
+                if isinstance(cfg, dict):
+                    with self._lock:
+                        self._niveau_reseau = cfg
 
             elif msg_type in ('game_state', 'health_update', 'game_over',
                               'player_disconnected', 'server_shutdown'):

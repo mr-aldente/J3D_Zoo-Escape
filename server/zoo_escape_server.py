@@ -54,6 +54,9 @@ class GameServer:
 
         self.clients: Dict[int, socket.socket] = {}  # {player_id: socket}
         self.game_state = GameState()
+        self.lobby_chars: Dict[int, str] = {}
+        self.lobby_level: Optional[dict] = None
+        self._send_lock = threading.Lock()
         self.running = True
         self._beacon_running = False
         self._game_started = False
@@ -87,6 +90,8 @@ class GameServer:
         if len(self.clients) == 2 and not self._game_started:
             self._beacon_running = False
             self._game_started = True
+            self.lobby_chars = {}
+            self.lobby_level = None
             seed = random.randint(0, 2**31)
             print(f"[SERVEUR] 2 joueurs connectés ! Partie lancée. Seed={seed}")
             self.broadcast({'type': 'game_start', 'seed': seed})
@@ -166,6 +171,23 @@ class GameServer:
                         'type': 'game_state',
                         'state': self.serialize_game_state(),
                     })
+                elif msg_type == 'lobby_char':
+                    perso = data.get('personnage')
+                    if isinstance(perso, str) and perso:
+                        self.lobby_chars[player_id] = perso
+                        self.broadcast({
+                            'type': 'lobby_state',
+                            'chars': dict(self.lobby_chars),
+                            'both_ready': 0 in self.lobby_chars and 1 in self.lobby_chars,
+                        })
+
+                elif msg_type == 'lobby_level':
+                    # Seul J1 (host logique) choisit la difficulté / niveau.
+                    if player_id == 0:
+                        cfg = data.get('config')
+                        if isinstance(cfg, dict):
+                            self.lobby_level = cfg
+                            self.broadcast({'type': 'lobby_level', 'config': cfg})
 
                 elif msg_type == 'damage':
                     amount = data.get('amount', 1)
@@ -253,8 +275,11 @@ class GameServer:
             if size > 1_000_000:
                 print(f"[SERVEUR] Payload trop gros: {size} bytes")
                 return
-            client_socket.sendall(size.to_bytes(4, 'big'))
-            client_socket.sendall(serialized)
+            # Plusieurs threads serveur envoient potentiellement en parallèle :
+            # on sérialise les écritures pour éviter la corruption de trames TCP.
+            with self._send_lock:
+                client_socket.sendall(size.to_bytes(4, 'big'))
+                client_socket.sendall(serialized)
         except OSError as e:
             # Connexion déjà fermée (déconnexion normale) : pas de log bruyant
             if self.running and getattr(e, "errno", None) not in (9, 32, 54, 104):
@@ -296,6 +321,8 @@ class GameServer:
 
         if len(self.clients) < 2:
             self._game_started = False
+            self.lobby_level = None
+            self.lobby_chars = {}
 
         # Notifie l'autre joueur si la partie est en cours
         if len(self.clients) > 0:
