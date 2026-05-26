@@ -19,7 +19,7 @@ Fichier produit : `installer\output\ZooEscape_Setup.exe` (copié aussi ici).
 
 ## GitHub Releases
 
-Release publiée : https://github.com/mr-aldente/J3D_Zoo-Escape/releases/tag/v1.0.2
+Release publiée : https://github.com/mr-aldente/J3D_Zoo-Escape/releases/tag/v1.0.3
 
 Lien direct du installateur :
 https://github.com/mr-aldente/J3D_Zoo-Escape/releases/latest/download/ZooEscape_Setup.exe

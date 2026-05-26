@@ -2,7 +2,7 @@
 ; Compiler avec Inno Setup 6+ : iscc installer\ZooEscape.iss
 
 #define MyAppName "Zoo Escape"
-#define MyAppVersion "1.0.2"
+#define MyAppVersion "1.0.3"
 #define MyAppPublisher "Zoo Escape — Projet J3D EPITA"
 #define MyAppURL "https://j3d-zoo-escape.onrender.com"
 #define MyAppExeName "ZooEscape.exe"

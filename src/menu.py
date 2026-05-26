@@ -887,7 +887,16 @@ def _dessiner_apercu_personnage(ecran, x, y, perso):
     _dessiner_personnage_carte(ecran, x, y, perso["couleurs"][0])
 
 
-def afficher_selection_difficulte(ecran, largeur, hauteur):
+def _reseau_menu_tick(client_reseau) -> bool:
+    """Heartbeat + détection déconnexion pendant les écrans de menu."""
+    if client_reseau is None:
+        return True
+    if not client_reseau.envoyer_heartbeat() or client_reseau.connexion_perdue():
+        return False
+    return True
+
+
+def afficher_selection_difficulte(ecran, largeur, hauteur, client_reseau=None):
     """
     Écran de sélection de difficulté : TEST / EASY / MEDIUM / HARD.
     Retourne l'id de difficulté ("test"|"easy"|"medium"|"hard") ou None si annulé.
@@ -905,6 +914,9 @@ def afficher_selection_difficulte(ecran, largeur, hauteur):
     while True:
         horloge.tick(FPS)
         tick += 1
+
+        if not _reseau_menu_tick(client_reseau):
+            return None
 
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
@@ -1241,7 +1253,7 @@ def afficher_selection_personnages(ecran, largeur, hauteur, nb_joueurs=2, j2_ia=
     }
 
 
-def afficher_carte_monde(ecran, largeur, hauteur, difficulte: str, nb_joueurs=2, j2_ia=False):
+def afficher_carte_monde(ecran, largeur, hauteur, difficulte: str, nb_joueurs=2, j2_ia=False, client_reseau=None):
     """
     Carte du monde style Mario Bros — pleine largeur, défilement vertical.
 
@@ -1305,6 +1317,9 @@ def afficher_carte_monde(ecran, largeur, hauteur, difficulte: str, nb_joueurs=2,
     while True:
         horloge.tick(FPS)
         tick += 1
+
+        if not _reseau_menu_tick(client_reseau):
+            return None
 
         # ── Caméra : suit le nœud sélectionné ────────────────────────────────
         cam_target = float(noeuds[sel]["abs_y"]) - hauteur / 2
@@ -2090,6 +2105,9 @@ def afficher_attente_connexion(ecran, largeur, hauteur, client, info_hote=None):
                 client.fermer()
                 return False
 
+        if not client.envoyer_heartbeat() or client.connexion_perdue():
+            return False
+
         if client.game_start_recu:
             return True
         if not client.connecte:
@@ -2203,7 +2221,7 @@ def lancer_partie(dossier_courant, menu_params):
         seed = client.seed
 
     # ── Étape 3 : difficulté puis niveau ─────────────────────────────────────
-    difficulte = afficher_selection_difficulte(ecran, w, h)
+    difficulte = afficher_selection_difficulte(ecran, w, h, client_reseau=client)
     if difficulte is None:
         if client: client.fermer()
         _retour(); return
@@ -2213,6 +2231,7 @@ def lancer_partie(dossier_courant, menu_params):
     else:
         config_niveau = afficher_carte_monde(
             ecran, w, h, difficulte, nb_joueurs=nb_joueurs, j2_ia=j2_ia,
+            client_reseau=client,
         )
         if config_niveau is None:
             if client: client.fermer()
@@ -2231,16 +2250,19 @@ def lancer_partie(dossier_courant, menu_params):
 
     # ── Étape 4 : lancement du jeu ───────────────────────────────────────────
     def get_nouveau_niveau():
-        diff = afficher_selection_difficulte(ecran, w, h)
+        diff = afficher_selection_difficulte(ecran, w, h, client_reseau=client)
         if diff is None:
             return None
         if diff == "test":
             return dict(jeu.NIVEAUX[0], _numero=0)
         return afficher_carte_monde(
             ecran, w, h, diff, nb_joueurs=nb_joueurs, j2_ia=j2_ia,
+            client_reseau=client,
         )
 
     try:
+        if client:
+            client.preparer_debut_partie()
         jeu.lancer_jeu(ecran, config_niveau, client_reseau=client,
                        player_id=player_id, seed=seed,
                        get_nouveau_niveau=get_nouveau_niveau)

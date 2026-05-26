@@ -145,16 +145,18 @@ class GameServer:
     
     def handle_client(self, player_id: int, client_socket: socket.socket):
         """Gère la communication avec un client"""
-        client_socket.settimeout(5.0)  # 5 sec timeout pour détecter les déconnexions
+        client_socket.settimeout(15.0)
         try:
             while self.running:
-                # Reçoit les données du client
-                data = self.receive_data(client_socket)
-                
-                if not data:
-                    print(f"[SERVEUR] Joueur {player_id} : aucune donnée reçue, déconnexion")
+                try:
+                    data = self.receive_data(client_socket)
+                except socket.timeout:
+                    continue
+
+                if data is None:
+                    print(f"[SERVEUR] Joueur {player_id} déconnecté (socket fermée)")
                     break
-                
+
                 msg_type = data.get('type')
                 
                 # Traite selon le type de message
@@ -181,8 +183,6 @@ class GameServer:
                     self.send_data(client_socket, {'type': 'heartbeat_ack'})
                     continue
 
-        except socket.timeout:
-            print(f"[SERVEUR] Timeout avec joueur {player_id}")
         except Exception as e:
             print(f"[SERVEUR] Erreur avec joueur {player_id}: {e}")
         finally:
@@ -239,7 +239,7 @@ class GameServer:
                 data += chunk
             except socket.timeout:
                 if len(data) == 0:
-                    return None
+                    raise
                 continue
             except Exception:
                 return None
@@ -266,17 +266,19 @@ class GameServer:
             size_bytes = self._recv_exact(client_socket, 4)
             if not size_bytes:
                 return None
-            
+
             size = int.from_bytes(size_bytes, 'big')
             if size <= 0 or size > 1_000_000:
                 print(f"[SERVEUR] Taille invalide reçue: {size}")
                 return None
-            
+
             payload = self._recv_exact(client_socket, size)
             if not payload:
                 return None
-            
+
             return pickle.loads(payload)
+        except socket.timeout:
+            raise
         except Exception as e:
             print(f"[SERVEUR] Erreur de réception: {e}")
             return None

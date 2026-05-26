@@ -101,6 +101,7 @@ class ClientReseau:
         self._dernier_etat_jeu: Optional[dict] = None
         self._lock = threading.Lock()
         self._running = False
+        self._heartbeat_tick = 0
 
     # ── Connexion ──────────────────────────────────────────────────────────────
 
@@ -130,6 +131,40 @@ class ClientReseau:
         return False
 
     # ── Communication en jeu ───────────────────────────────────────────────────
+
+    def envoyer_heartbeat(self) -> bool:
+        """Maintient la connexion pendant les menus (difficulté, carte, etc.)."""
+        if not self.connecte:
+            return False
+        self._heartbeat_tick += 1
+        if self._heartbeat_tick % 15 != 0:
+            return True
+        try:
+            self._envoyer({'type': 'heartbeat'})
+            return True
+        except Exception as e:
+            print(f"[CLIENT] Erreur heartbeat: {e}")
+            self.connecte = False
+            return False
+
+    def connexion_perdue(self) -> bool:
+        """True si le serveur a signalé une déconnexion ou si le socket est mort."""
+        if not self.connecte:
+            return True
+        with self._lock:
+            etat = self._dernier_etat_jeu
+        if etat and etat.get('type') in ('player_disconnected', 'server_shutdown'):
+            self.connecte = False
+            return True
+        return False
+
+    def preparer_debut_partie(self) -> None:
+        """Efface les vieux messages d'erreur reçus pendant les menus."""
+        with self._lock:
+            if self._dernier_etat_jeu and self._dernier_etat_jeu.get('type') in (
+                'player_disconnected', 'server_shutdown', 'game_over',
+            ):
+                self._dernier_etat_jeu = None
 
     def envoyer_etat_joueur(self, joueur) -> None:
         """
