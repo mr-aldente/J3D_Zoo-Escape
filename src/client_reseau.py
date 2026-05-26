@@ -27,6 +27,24 @@ import json as _json
 from typing import Optional, List
 
 DISCOVERY_PORT = 5556  # Must match zoo_escape_server.py
+DEFAULT_PORT = 5555
+
+
+def get_local_ip() -> str:
+    """IP LAN de ce PC (pour affichage à l'hôte)."""
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.settimeout(0.5)
+        s.connect(("8.8.8.8", 80))
+        ip = s.getsockname()[0]
+        s.close()
+        return ip
+    except Exception:
+        pass
+    try:
+        return socket.gethostbyname(socket.gethostname())
+    except Exception:
+        return "127.0.0.1"
 
 
 def scanner_jeux_lan(timeout: float = 2.0) -> List[dict]:
@@ -72,10 +90,9 @@ class ClientReseau:
             jeu = JeuDeuxJoueurs(config_niveau, client_reseau=client, player_id=client.player_id)
     """
 
-    PORT = 5555
-
-    def __init__(self, host: str):
+    def __init__(self, host: str, port: int = DEFAULT_PORT):
         self.host = host
+        self.port = int(port)
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.player_id: Optional[int] = None   # attribué par le serveur (0=J1, 1=J2)
         self.seed: Optional[int] = None        # seed partagé pour la génération des obstacles
@@ -94,7 +111,7 @@ class ClientReseau:
         """
         try:
             self.sock.settimeout(timeout)
-            self.sock.connect((self.host, self.PORT))
+            self.sock.connect((self.host, self.port))
             self.sock.settimeout(5.0)  # Garde 5 sec timeout après connexion
 
             # Le serveur envoie immédiatement le player_id
@@ -109,7 +126,7 @@ class ClientReseau:
                 print(f"[CLIENT] Connecté ! Player ID = {self.player_id}")
                 return True
         except Exception as e:
-            print(f"[CLIENT] Erreur connexion à {self.host}:{self.PORT} → {e}")
+            print(f"[CLIENT] Erreur connexion à {self.host}:{self.port} → {e}")
         return False
 
     # ── Communication en jeu ───────────────────────────────────────────────────

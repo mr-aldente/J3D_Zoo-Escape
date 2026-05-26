@@ -2,7 +2,7 @@
 # Prerequis : gh auth login
 
 $ErrorActionPreference = "Stop"
-$Version = "v1.0.1"
+$Version = "v1.0.2"
 $Repo = "mr-aldente/J3D_Zoo-Escape"
 $Setup = Join-Path $PSScriptRoot "output\ZooEscape_Setup.exe"
 
@@ -23,8 +23,8 @@ if ($exists) {
     gh release upload $Version $Setup --repo $Repo --clobber
 } else {
     Write-Host "Creation de la release $Version..."
-    gh release create $Version --repo $Repo --title "Zoo Escape 1.0.0" `
-        --notes "Installateur Windows SAE J3D. Executez ZooEscape_Setup.exe (jeu uniquement). Python non requis pour jouer." `
+    gh release create $Version --repo $Repo --title "Zoo Escape 1.0.2" `
+        --notes "Installateur corrige (plus de message build.ps1). Multijoueur 2 PC : HEBERGER + SCAN LAN ou ENTRE IP. Python non requis pour jouer." `
         $Setup
 }
 

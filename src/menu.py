@@ -30,6 +30,7 @@ import subprocess
 import socket as _socket
 import jeu
 import client_reseau as reseau
+import reseau_config
 import app_paths
 pygame.init()
 pygame.mixer.init()
@@ -1700,22 +1701,95 @@ def _dessiner_icone_mode(ecran, mode_id, cx, cy, couleur):
         pygame.draw.circle(ecran, couleur, (cx, cy + 12), 4)
 
 
+def _tenter_connexion(ip: str, port: int = None, tentatives: int = 6):
+    """
+    Tente de se connecter au serveur (plusieurs essais pour laisser le temps au serveur de démarrer).
+    Retourne (client, player_id) si succès, None sinon.
+    """
+    import time as _time
+    if port is None:
+        port = reseau.DEFAULT_PORT
+    ip = (ip or "").strip()
+    if not ip:
+        return None
+    for _ in range(tentatives):
+        client = reseau.ClientReseau(ip, port)
+        if client.connecter(timeout=4.0):
+            return (client, client.player_id)
+        _time.sleep(0.55)
+    return None
+
+
+def _saisir_ip_manuelle(ecran, largeur, hauteur):
+    """Saisie clavier d'une adresse IP (ex. 192.168.1.42). Retourne l'IP ou None."""
+    horloge = pygame.time.Clock()
+    texte = ""
+    btn_ok = Bouton(largeur // 2 - 170, hauteur // 2 + 40, 150, 50, "CONNECTER", (80, 220, 130))
+    btn_ann = Bouton(largeur // 2 + 20, hauteur // 2 + 40, 150, 50, "RETOUR", GRIS)
+
+    while True:
+        horloge.tick(FPS)
+        pos = pygame.mouse.get_pos()
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                return None
+            if event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_ESCAPE:
+                    return None
+                if event.key == pygame.K_RETURN:
+                    return texte.strip() if texte.strip() else None
+                if event.key == pygame.K_BACKSPACE:
+                    texte = texte[:-1]
+                elif event.unicode and event.unicode.isprintable():
+                    c = event.unicode
+                    if c in "0123456789." and len(texte) < 15:
+                        texte += c
+            if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                if btn_ann.est_clique(pos):
+                    return None
+                if btn_ok.est_clique(pos):
+                    return texte.strip() if texte.strip() else None
+
+        _fond_degrade(ecran, largeur, hauteur)
+        f_t = pygame.font.SysFont(None, 48, bold=True)
+        ecran.blit(f_t.render("ADRESSE IP DU SERVEUR", True, JAUNE_LOGO),
+                   f_t.render("ADRESSE IP DU SERVEUR", True, JAUNE_LOGO)
+                   .get_rect(center=(largeur // 2, 90)))
+        f_b = pygame.font.SysFont(None, 36)
+        boite = pygame.Rect(largeur // 2 - 220, hauteur // 2 - 50, 440, 56)
+        pygame.draw.rect(ecran, (20, 30, 50), boite, border_radius=8)
+        pygame.draw.rect(ecran, (80, 160, 220), boite, 2, border_radius=8)
+        aff = texte + "|" if (pygame.time.get_ticks() // 500) % 2 == 0 else texte
+        ecran.blit(f_b.render(aff or "192.168.x.x", True, BLANC if texte else (100, 110, 130)),
+                   f_b.render(aff or "192.168.x.x", True, BLANC if texte else (100, 110, 130))
+                   .get_rect(center=boite.center))
+        f_h = pygame.font.SysFont(None, 24)
+        ecran.blit(f_h.render("Clavier : chiffres et point  |  Entrée valider", True, (140, 150, 170)),
+                   f_h.render("Clavier : chiffres et point  |  Entrée valider", True, (140, 150, 170))
+                   .get_rect(center=(largeur // 2, hauteur // 2 + 10)))
+        btn_ok.verifier_survol(pos)
+        btn_ann.verifier_survol(pos)
+        btn_ok.dessiner(ecran)
+        btn_ann.dessiner(ecran)
+        pygame.display.flip()
+
+
 def afficher_ecran_reseau(ecran, largeur, hauteur):
     """
     Écran de configuration réseau.
 
-    Affiche deux boutons : HÉBERGER et REJOINDRE.
-      - HÉBERGER : lance le serveur en sous-processus et attend la connexion sur localhost.
-      - REJOINDRE : scanne le LAN via UDP beacon et affiche la liste des parties disponibles.
-
+    HÉBERGER : lance le serveur sur ce PC (l'autre joueur se connecte à ton IP).
+    REJOINDRE : scan LAN ou saisie IP manuelle.
     Retourne (client, player_id, processus_serveur) si la connexion réussit.
-    processus_serveur est non-None uniquement si ce PC a lancé le serveur (Héberger).
-    Retourne None si annulé.
-    """
+  """
     import time as _time
 
     horloge = pygame.time.Clock()
-    # "menu" | "hote_attente" | "rejoindre_scan"
+    cfg_pub = reseau_config.charger_config_reseau()
+    host_public = (cfg_pub.get("public_host") or "").strip()
+    port_public = int(cfg_pub.get("public_port") or reseau.DEFAULT_PORT)
+
+    # "menu" | "rejoindre_scan" | "saisie_ip"
     ecran_actif = "menu"
     message_erreur = ""
     erreur_timer = 0
@@ -1728,10 +1802,14 @@ def afficher_ecran_reseau(ecran, largeur, hauteur):
     dernier_scan = 0.0
     DELAI_RESCAN = 3.0  # relance un scan toutes les 3 s
 
-    sel_choix = 0  # clavier : 0=Héberger, 1=Rejoindre
+    # 0=Héberger, 1=Scan LAN, 2=IP manuelle, 3=Serveur public (si configuré)
+    nb_choix_menu = 4 if host_public else 3
+    sel_choix = 0
 
-    btn_hote           = Bouton(largeur // 2 - 220, hauteur // 2 - 40,  200, 60, "HÉBERGER",   (80, 220, 130))
-    btn_rejoindre      = Bouton(largeur // 2 + 20,  hauteur // 2 - 40,  200, 60, "REJOINDRE",  (100, 180, 255))
+    btn_hote           = Bouton(largeur // 2 - 220, hauteur // 2 - 70,  200, 52, "HÉBERGER",   (80, 220, 130))
+    btn_rejoindre      = Bouton(largeur // 2 + 20,  hauteur // 2 - 70,  200, 52, "SCAN LAN",   (100, 180, 255))
+    btn_ip             = Bouton(largeur // 2 - 220, hauteur // 2,      200, 52, "ENTRER IP",  (200, 160, 80))
+    btn_public         = Bouton(largeur // 2 + 20,  hauteur // 2,      200, 52, "INTERNET",   (180, 100, 255))
     btn_retour_menu    = Bouton(largeur // 2 - 80,  hauteur // 2 + 200, 160, 50, "RETOUR",     GRIS)
     btn_retour_scan    = Bouton(largeur // 2 - 80,  hauteur - 55,       160, 44, "RETOUR",     GRIS)
     btn_rafraichir     = Bouton(largeur // 2 - 80,  hauteur - 105,      160, 44, "RAFRAÎCHIR", (80, 160, 220))
@@ -1802,39 +1880,60 @@ def afficher_ecran_reseau(ecran, largeur, hauteur):
                         return None
 
                 elif ecran_actif == "menu":
-                    if event.key in (pygame.K_LEFT, pygame.K_RIGHT):
-                        sel_choix = 1 - sel_choix
+                    if event.key in (pygame.K_LEFT, pygame.K_RIGHT, pygame.K_UP, pygame.K_DOWN):
+                        sel_choix = (sel_choix + 1) % nb_choix_menu
                     elif event.key == pygame.K_RETURN:
                         if sel_choix == 0:
                             if _lancer_serveur():
-                                _time.sleep(0.8)
-                                result = _tenter_connexion("127.0.0.1")
+                                result = _tenter_connexion("127.0.0.1", tentatives=12)
                                 if result:
                                     return (*result, processus_serveur)
-                                message_erreur = "Serveur non démarré — réessaie"
+                                message_erreur = "Serveur non démarré — réessaie (pare-feu ?)"
                                 erreur_timer = 180
-                                processus_serveur.terminate()
-                                processus_serveur = None
-                            # stay on menu so user sees error
-                        else:
+                                if processus_serveur:
+                                    processus_serveur.terminate()
+                                    processus_serveur = None
+                        elif sel_choix == 1:
                             ecran_actif = "rejoindre_scan"
                             _lancer_scan()
+                        elif sel_choix == 2:
+                            ecran_actif = "saisie_ip"
+                        elif sel_choix == 3 and host_public:
+                            result = _tenter_connexion(host_public, port_public, tentatives=8)
+                            if result:
+                                return (*result, None)
+                            message_erreur = f"Serveur {host_public} injoignable"
+                            erreur_timer = 200
 
             if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
                 if ecran_actif == "menu":
                     if btn_hote.est_clique(pos):
                         if _lancer_serveur():
-                            _time.sleep(0.8)
-                            result = _tenter_connexion("127.0.0.1")
+                            result = _tenter_connexion("127.0.0.1", tentatives=12)
                             if result:
                                 return (*result, processus_serveur)
-                            message_erreur = "Serveur non démarré — réessaie"
+                            message_erreur = "Serveur non démarré — réessaie (pare-feu ?)"
                             erreur_timer = 180
-                            processus_serveur.terminate()
-                            processus_serveur = None
+                            if processus_serveur:
+                                processus_serveur.terminate()
+                                processus_serveur = None
                     elif btn_rejoindre.est_clique(pos):
                         ecran_actif = "rejoindre_scan"
                         _lancer_scan()
+                    elif btn_ip.est_clique(pos):
+                        ip = _saisir_ip_manuelle(ecran, largeur, hauteur)
+                        if ip:
+                            result = _tenter_connexion(ip, tentatives=8)
+                            if result:
+                                return (*result, None)
+                            message_erreur = f"Impossible de joindre {ip}"
+                            erreur_timer = 200
+                    elif host_public and btn_public.est_clique(pos):
+                        result = _tenter_connexion(host_public, port_public, tentatives=8)
+                        if result:
+                            return (*result, None)
+                        message_erreur = f"Serveur {host_public} injoignable"
+                        erreur_timer = 200
                     elif btn_retour_menu.est_clique(pos):
                         return None
 
@@ -1851,7 +1950,8 @@ def afficher_ecran_reseau(ecran, largeur, hauteur):
                                 largeur // 2 - 220, 160 + i * 68, 440, 56
                             )
                             if ligne_rect.collidepoint(pos):
-                                result = _tenter_connexion(jeu_info['ip'])
+                                port = int(jeu_info.get('port', reseau.DEFAULT_PORT))
+                                result = _tenter_connexion(jeu_info['ip'], port, tentatives=6)
                                 if result:
                                     return (*result, None)
                                 message_erreur = f"Impossible de rejoindre {jeu_info['nom']}"
@@ -1874,18 +1974,32 @@ def afficher_ecran_reseau(ecran, largeur, hauteur):
 
             btn_hote.verifier_survol(pos)
             btn_rejoindre.verifier_survol(pos)
+            btn_ip.verifier_survol(pos)
             btn_hote.est_survole      = btn_hote.est_survole      or (sel_choix == 0)
             btn_rejoindre.est_survole = btn_rejoindre.est_survole or (sel_choix == 1)
+            btn_ip.est_survole        = btn_ip.est_survole        or (sel_choix == 2)
             btn_hote.dessiner(ecran)
             btn_rejoindre.dessiner(ecran)
+            btn_ip.dessiner(ecran)
+            if host_public:
+                btn_public.verifier_survol(pos)
+                btn_public.est_survole = btn_public.est_survole or (sel_choix == 3)
+                btn_public.dessiner(ecran)
 
-            f_sub = pygame.font.SysFont(None, 22)
-            ecran.blit(f_sub.render("Lance le serveur sur ce PC", True, (120, 200, 130)),
-                       f_sub.render("Lance le serveur sur ce PC", True, (120, 200, 130))
-                       .get_rect(center=(largeur // 2 - 120, hauteur // 2 + 35)))
-            ecran.blit(f_sub.render("Cherche une partie sur le réseau", True, (120, 160, 255)),
-                       f_sub.render("Cherche une partie sur le réseau", True, (120, 160, 255))
-                       .get_rect(center=(largeur // 2 + 120, hauteur // 2 + 35)))
+            ip_locale = reseau.get_local_ip()
+            f_sub = pygame.font.SysFont(None, 20)
+            ecran.blit(f_sub.render("Hôte : l'autre joueur utilise ton IP", True, (120, 200, 130)),
+                       f_sub.render("Hôte : l'autre joueur utilise ton IP", True, (120, 200, 130))
+                       .get_rect(center=(largeur // 2 - 120, hauteur // 2 - 95)))
+            ecran.blit(f_sub.render(f"Ton IP : {ip_locale}", True, (255, 220, 100)),
+                       f_sub.render(f"Ton IP : {ip_locale}", True, (255, 220, 100))
+                       .get_rect(center=(largeur // 2, hauteur // 2 - 95)))
+            ecran.blit(f_sub.render("Même Wi-Fi : scan LAN", True, (120, 160, 255)),
+                       f_sub.render("Même Wi-Fi : scan LAN", True, (120, 160, 255))
+                       .get_rect(center=(largeur // 2 - 120, hauteur // 2 + 55)))
+            ecran.blit(f_sub.render("Sinon : ENTRE IP", True, (200, 170, 120)),
+                       f_sub.render("Sinon : ENTRE IP", True, (200, 170, 120))
+                       .get_rect(center=(largeur // 2 + 120, hauteur // 2 + 55)))
 
             btn_retour_menu.verifier_survol(pos)
             btn_retour_menu.dessiner(ecran)
@@ -1953,18 +2067,7 @@ def afficher_ecran_reseau(ecran, largeur, hauteur):
         pygame.display.flip()
 
 
-def _tenter_connexion(ip: str):
-    """
-    Tente de se connecter au serveur à l'IP donnée.
-    Retourne (client, player_id) si succès, None sinon.
-    """
-    client = reseau.ClientReseau(ip)
-    if client.connecter(timeout=4.0):
-        return (client, client.player_id)
-    return None
-
-
-def afficher_attente_connexion(ecran, largeur, hauteur, client):
+def afficher_attente_connexion(ecran, largeur, hauteur, client, info_hote=None):
     """
     Écran d'attente affiché après connexion, jusqu'au signal game_start du serveur.
 
@@ -2022,6 +2125,17 @@ def afficher_attente_connexion(ecran, largeur, hauteur, client):
                    f_info.render("En attente de l'autre joueur...", True, (160, 160, 160))
                    .get_rect(center=(largeur // 2, hauteur // 2 + 95)))
 
+        if info_hote and client.player_id == 0:
+            f_ip = pygame.font.SysFont(None, 26)
+            ip_txt = info_hote.get("ip", "?")
+            port_txt = info_hote.get("port", reseau.DEFAULT_PORT)
+            ligne = f"Donne cette IP à ton coéquipier : {ip_txt}:{port_txt}"
+            ecran.blit(f_ip.render(ligne, True, (255, 220, 120)),
+                       f_ip.render(ligne, True, (255, 220, 120))
+                       .get_rect(center=(largeur // 2, hauteur // 2 + 130)))
+            hint = f_ip.render("L'autre : Mode réseau → SCAN LAN ou ENTRE IP", True, (150, 160, 180))
+            ecran.blit(hint, hint.get_rect(center=(largeur // 2, hauteur // 2 + 158)))
+
         f_aide = pygame.font.SysFont(None, 24)
         ecran.blit(f_aide.render("ESC  annuler", True, (120, 130, 150)),
                    f_aide.render("ESC  annuler", True, (120, 130, 150))
@@ -2077,7 +2191,10 @@ def lancer_partie(dossier_courant, menu_params):
         if result is None:
             _retour(); return
         client, player_id, processus_serveur = result
-        if not afficher_attente_connexion(ecran, w, h, client):
+        info_hote = None
+        if processus_serveur is not None:
+            info_hote = {"ip": reseau.get_local_ip(), "port": reseau.DEFAULT_PORT}
+        if not afficher_attente_connexion(ecran, w, h, client, info_hote):
             if client:
                 client.fermer()
             if processus_serveur:

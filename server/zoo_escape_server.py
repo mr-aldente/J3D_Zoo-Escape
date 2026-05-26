@@ -28,6 +28,23 @@ class GameState:
 DISCOVERY_PORT = 5556  # UDP port used for LAN broadcast discovery
 
 
+def get_local_ip() -> str:
+    """IP LAN réelle (évite 127.0.0.1 sous Windows)."""
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.settimeout(0.5)
+        s.connect(("8.8.8.8", 80))
+        ip = s.getsockname()[0]
+        s.close()
+        return ip
+    except Exception:
+        pass
+    try:
+        return socket.gethostbyname(socket.gethostname())
+    except Exception:
+        return "127.0.0.1"
+
+
 class GameServer:
     def __init__(self, host='0.0.0.0', port=5555):
         self.host = host
@@ -39,16 +56,14 @@ class GameServer:
         self.game_state = GameState()
         self.running = True
         self._beacon_running = False
+        self._game_started = False
 
         print(f"[SERVEUR] Initialisation sur {host}:{port}")
 
     def _beacon_thread(self):
         """Broadcasts server presence via UDP so clients can discover it without entering an IP."""
         import json as _json
-        try:
-            ip_locale = socket.gethostbyname(socket.gethostname())
-        except Exception:
-            ip_locale = "127.0.0.1"
+        ip_locale = get_local_ip()
         nom = socket.gethostname()
         udp = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         udp.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
@@ -68,44 +83,63 @@ class GameServer:
         udp.close()
         print("[SERVEUR] Beacon UDP arrêté")
 
-    def start(self):
-        """Démarre le serveur"""
-        self.server_socket.bind((self.host, self.port))
-        self.server_socket.listen(2)  # Max 2 joueurs
-        print(f"[SERVEUR] En attente de connexions...")
+    def _demarrer_partie_si_pret(self):
+        if len(self.clients) == 2 and not self._game_started:
+            self._beacon_running = False
+            self._game_started = True
+            seed = random.randint(0, 2**31)
+            print(f"[SERVEUR] 2 joueurs connectés ! Partie lancée. Seed={seed}")
+            self.broadcast({'type': 'game_start', 'seed': seed})
 
-        # Start LAN discovery beacon
+    def start(self):
+        """Démarre le serveur et reste actif pendant toute la partie."""
+        self.server_socket.bind((self.host, self.port))
+        self.server_socket.listen(2)
+        print(f"[SERVEUR] En attente de connexions (max 2)...")
+        print(f"[SERVEUR] IP à donner à l'autre joueur : {get_local_ip()}:{self.port}")
+
         self._beacon_running = True
         t_beacon = threading.Thread(target=self._beacon_thread, daemon=True)
         t_beacon.start()
 
+        self.server_socket.settimeout(1.0)
+
         try:
-            while self.running and len(self.clients) < 2:
-                client_socket, address = self.server_socket.accept()
-                player_id = len(self.clients)
-                self.clients[player_id] = client_socket
+            while self.running:
+                if len(self.clients) < 2:
+                    try:
+                        client_socket, address = self.server_socket.accept()
+                    except socket.timeout:
+                        continue
+                    except OSError:
+                        break
 
-                print(f"[SERVEUR] Joueur {player_id} connecté depuis {address}")
+                    player_id = len(self.clients)
+                    self.clients[player_id] = client_socket
+                    print(f"[SERVEUR] Joueur {player_id} connecté depuis {address}")
 
-                # Envoie l'ID au joueur
-                self.send_data(client_socket, {'type': 'player_id', 'id': player_id})
+                    self.send_data(client_socket, {'type': 'player_id', 'id': player_id})
 
-                # Lance un thread pour gérer ce client
-                thread = threading.Thread(target=self.handle_client, args=(player_id, client_socket))
-                thread.daemon = True
-                thread.start()
-
-            if len(self.clients) == 2:
-                # Stop beacon — game is full
-                self._beacon_running = False
-                # Génère un seed partagé pour que les deux clients aient
-                # exactement les mêmes obstacles (même séquence random).
-                seed = random.randint(0, 2**31)
-                print(f"[SERVEUR] 2 joueurs connectés ! Partie lancée. Seed={seed}")
-                self.broadcast({'type': 'game_start', 'seed': seed})
+                    thread = threading.Thread(
+                        target=self.handle_client,
+                        args=(player_id, client_socket),
+                        daemon=True,
+                    )
+                    thread.start()
+                    self._demarrer_partie_si_pret()
+                else:
+                    import time
+                    time.sleep(0.2)
+                    if len(self.clients) < 2:
+                        self._game_started = False
+                        if not self._beacon_running:
+                            self._beacon_running = True
+                            t_beacon = threading.Thread(target=self._beacon_thread, daemon=True)
+                            t_beacon.start()
 
         except KeyboardInterrupt:
             print("\n[SERVEUR] Arrêt du serveur...")
+        finally:
             self._beacon_running = False
             self.shutdown()
     
@@ -126,7 +160,11 @@ class GameServer:
                 # Traite selon le type de message
                 if msg_type == 'player_state':
                     self.update_player_state(player_id, data.get('state', {}))
-                    
+                    self.broadcast({
+                        'type': 'game_state',
+                        'state': self.serialize_game_state(),
+                    })
+
                 elif msg_type == 'damage':
                     amount = data.get('amount', 1)
                     self.game_state.shared_health -= amount
@@ -142,17 +180,7 @@ class GameServer:
                 elif msg_type == 'heartbeat':
                     self.send_data(client_socket, {'type': 'heartbeat_ack'})
                     continue
-                
-                # Renvoie l'état complet du jeu à ce joueur
-                try:
-                    self.send_data(client_socket, {
-                        'type': 'game_state',
-                        'state': self.serialize_game_state()
-                    })
-                except Exception as e:
-                    print(f"[SERVEUR] Erreur d'envoi game_state à joueur {player_id}: {e}")
-                    break
-                
+
         except socket.timeout:
             print(f"[SERVEUR] Timeout avec joueur {player_id}")
         except Exception as e:
@@ -263,7 +291,10 @@ class GameServer:
         
         if player_id in self.clients:
             del self.clients[player_id]
-        
+
+        if len(self.clients) < 2:
+            self._game_started = False
+
         # Notifie l'autre joueur si la partie est en cours
         if len(self.clients) > 0:
             self.broadcast({'type': 'player_disconnected', 'player_id': player_id})
@@ -288,17 +319,15 @@ class GameServer:
         print("[SERVEUR] Serveur arrêté.")
 
 if __name__ == "__main__":
-    # Affiche l'IP locale pour que l'autre joueur sache où se connecter
-    try:
-        ip_locale = socket.gethostbyname(socket.gethostname())
-    except Exception:
-        ip_locale = "inconnue"
+    import os
+    port = int(os.environ.get("PORT", "5555"))
+    ip_locale = get_local_ip()
     print("=" * 45)
     print("   ZOO ESCAPE — Serveur de jeu")
     print("=" * 45)
     print(f"   IP locale    : {ip_locale}")
-    print(f"   Port         : 5555")
-    print(f"   Donne cette IP à l'autre joueur !")
+    print(f"   Port         : {port}")
+    print("   Donne cette IP à l'autre joueur (même Wi-Fi ou IP publique).")
     print("=" * 45)
-    server = GameServer(host='0.0.0.0', port=5555)
+    server = GameServer(host='0.0.0.0', port=port)
     server.start()
