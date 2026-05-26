@@ -680,7 +680,7 @@ def afficher_selection_niveaux(ecran, largeur, hauteur, exclure_niveaux=None):
             ecran.blit(txt_label, txt_label.get_rect(center=(cx + card_w // 2, cy + 24)))
 
             # Numéro
-            f_num = pygame.font.SysFont(None, 80, bold=True)
+            f_num = pygame.font.Font(None, 80)  # Utiliser Font au lieu de SysFont
             txt_num = f_num.render(str(num), True, couleur if est_sel else (80, 90, 110))
             ecran.blit(txt_num, txt_num.get_rect(center=(cx + card_w // 2, cy + 100)))
 
@@ -771,7 +771,7 @@ _TOUS_NOEUDS_CARTE = [
     {"type": "level", "num": 4,    "nom": "Aquatic",  "couleur": (60,  150, 230), "pos_map": (0.37, 0.265)},
     # Personnage triangle attention (entre Aquatic et Boss)
     {"type": "bonus", "num": None, "nom": "⚠ Attention","couleur": (255, 210,  40), "pos_map": (0.36, 0.210)},
-    {"type": "level", "num": 5,    "nom": "Directeur Magnus", "couleur": (220,  60,  80), "pos_map": (0.36, 0.075), "boss": True},
+    {"type": "level", "num": 5,    "nom": "Boss", "couleur": (220,  60,  80), "pos_map": (0.36, 0.075), "boss": True},
 ]
 
 _VIES_PAR_DIFFICULTE = {"easy": 5, "medium": 3, "hard": 1}

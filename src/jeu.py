@@ -924,7 +924,7 @@ class Skybox:
                 "arctic": "Niveau 2 fini(1)_0000.png",                          # Niveau 2 - Arctic
                 "jungle": os.path.join("Niveau_3", "Niveau 3 fini_0000.png"),  # Niveau 3 - Jungle
                 "aquatic": os.path.join("Niveau_4", "Niveau 4 fini_0000.png"), # Niveau 4 - Aquatic
-                "boss_zoo": "Background_lvl1.png",                              # Boss (à définir plus tard)
+                "boss_zoo": os.path.join("BOSS_niveau", "Niveau Boss fini(1)_0000.png"), # Boss - Directeur Magnus
             }
             
             nom_image = noms_images.get(self.biome, "Background_lvl1.png")
@@ -2131,6 +2131,19 @@ class MiniBoss:
         self._wave_j1_touche = False
         self._wave_j2_touche = False
         self._palette = BIOMES["boss_zoo"]["palette"]
+        self.image_boss = self._charger_image_boss()
+
+    def _charger_image_boss(self):
+        """Charge l'image du boss depuis les assets."""
+        try:
+            chemin = os.path.join(app_paths.resource_dir(), "assets", "boss_designe.png")
+            if os.path.exists(chemin):
+                img = pygame.image.load(chemin).convert_alpha()
+                # Redimensionner à environ 150x200 pixels
+                return pygame.transform.scale(img, (150, 200))
+        except Exception as e:
+            print(f"Erreur chargement image boss: {e}")
+        return None
 
     def set_zone_boss(self, debut: float, fin: float):
         self.zone_start = debut
@@ -2315,24 +2328,29 @@ class MiniBoss:
         pygame.draw.line(ecran, (50, 70, 100), (bx, fenetre.y), (bx, fenetre.bottom), 2)
         pygame.draw.line(ecran, (50, 70, 100), (fenetre.x, fenetre.centery), (fenetre.right, fenetre.centery), 2)
 
-        # Directeur Magnus
-        cx, cy = bx, 118 + bob
-        pygame.draw.circle(ecran, (245, 210, 175), (cx, cy), 20)
-        pygame.draw.ellipse(ecran, (60, 35, 25), (cx - 18, cy + 6, 36, 14))
-        pygame.draw.rect(ecran, (170, 25, 35), (cx - 26, cy + 12, 52, 38), border_radius=6)
-        pygame.draw.rect(ecran, (140, 15, 25), (cx - 26, cy + 12, 52, 38), 2, border_radius=6)
-        pygame.draw.rect(ecran, (220, 180, 50), (cx - 30, cy + 16, 10, 10))
-        pygame.draw.rect(ecran, (220, 180, 50), (cx + 20, cy + 16, 10, 10))
-        pygame.draw.rect(ecran, (25, 25, 35), (cx - 24, cy - 14, 48, 16), border_radius=4)
-        pygame.draw.circle(ecran, (255, 255, 255), (cx + 10, cy - 4), 6)
-        pygame.draw.circle(ecran, (30, 30, 40), (cx + 12, cy - 4), 2)
-        pygame.draw.line(ecran, (40, 25, 15), (cx - 8, cy + 2), (cx - 2, cy + 2), 2)
-        pygame.draw.line(ecran, (40, 25, 15), (cx + 4, cy + 2), (cx + 10, cy + 2), 2)
+        # Directeur Magnus — affichage de l'image
+        if self.image_boss is not None:
+            boss_rect = self.image_boss.get_rect(center=(bx, 118 + bob))
+            ecran.blit(self.image_boss, boss_rect)
+        else:
+            # Fallback sur le dessin géométrique si l'image ne se charge pas
+            cx, cy = bx, 118 + bob
+            pygame.draw.circle(ecran, (245, 210, 175), (cx, cy), 20)
+            pygame.draw.ellipse(ecran, (60, 35, 25), (cx - 18, cy + 6, 36, 14))
+            pygame.draw.rect(ecran, (170, 25, 35), (cx - 26, cy + 12, 52, 38), border_radius=6)
+            pygame.draw.rect(ecran, (140, 15, 25), (cx - 26, cy + 12, 52, 38), 2, border_radius=6)
+            pygame.draw.rect(ecran, (220, 180, 50), (cx - 30, cy + 16, 10, 10))
+            pygame.draw.rect(ecran, (220, 180, 50), (cx + 20, cy + 16, 10, 10))
+            pygame.draw.rect(ecran, (25, 25, 35), (cx - 24, cy - 14, 48, 16), border_radius=4)
+            pygame.draw.circle(ecran, (255, 255, 255), (cx + 10, cy - 4), 6)
+            pygame.draw.circle(ecran, (30, 30, 40), (cx + 12, cy - 4), 2)
+            pygame.draw.line(ecran, (40, 25, 15), (cx - 8, cy + 2), (cx - 2, cy + 2), 2)
+            pygame.draw.line(ecran, (40, 25, 15), (cx + 4, cy + 2), (cx + 10, cy + 2), 2)
         if self.en_attaque and self.anim % 20 < 10:
             pygame.draw.polygon(ecran, (220, 50, 50), [
-                (cx + 28, cy + 8), (cx + 18, cy), (cx + 18, cy + 16),
+                (bx + 28, 118 + bob + 8), (bx + 18, 118 + bob), (bx + 18, 118 + bob + 16),
             ])
-            pygame.draw.rect(ecran, (240, 200, 60), (cx + 26, cy + 2, 14, 10), border_radius=2)
+            pygame.draw.rect(ecran, (240, 200, 60), (bx + 26, 118 + bob + 2, 14, 10), border_radius=2)
 
         # Barre de vie (liée à la progression 25 % → 100 %)
         bar_w, bar_h = 340, 18
@@ -2662,7 +2680,7 @@ def _info_prochain_niveau(numero_niveau):
 def _config_niveau_suivant(config_actuelle, numero_suivant):
     cfg = dict(NIVEAUX[numero_suivant], _numero=numero_suivant)
     for cle in (
-        "ai_j2", "j2_force_ia", "solo_j1", "controles_j1", "biome",
+        "ai_j2", "j2_force_ia", "solo_j1", "controles_j1",
         "mode_boss", "boss_zone_pct", "boss_run_after",
         "couleurs_j1", "nom_j1", "personnage_j1",
         "couleurs_j2", "nom_j2", "personnage_j2", "vies",
@@ -2971,12 +2989,12 @@ class JeuDeuxJoueurs:
         self.y_sol_j1 = int(HAUTEUR * y_sol_ratio)
         # J2 avec offset différent par biome
         y_sol_j2_offsets = {
-            "default": 58,       # Niveau 0
-            "savanna": 40,       # Niveau 1 - descendu encore plus
-            "arctic": 48,        # Niveau 2
-            "jungle": 38,        # Niveau 3 - plus bas
-            "aquatic": 52,       # Niveau 4 - remonte vraiment le joueur bas
-            "boss_zoo": 58,      # Boss
+            "default": 38,       # Niveau 0
+            "savanna": 20,       # Niveau 1 - descendu encore plus
+            "arctic": 28,        # Niveau 2
+            "jungle": 18,        # Niveau 3 - plus bas
+            "aquatic": 32,       # Niveau 4 - remonte vraiment le joueur bas
+            "boss_zoo": 38,      # Boss
         }
         y_sol_j2_offset = y_sol_j2_offsets.get(biome, 58)
         self.y_sol_j2 = min(int(HAUTEUR - y_sol_j2_offset), HAUTEUR - 43)
