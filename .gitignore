@@ -15,5 +15,13 @@ src/config.json
 # Logs
 *.log
 
+# Build installateur / PyInstaller
+build/
+dist/
+installer/dist/
+installer/output/
+installer/build/
+docs/downloads/*.exe
+
 
 

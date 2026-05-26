@@ -22,6 +22,8 @@ from collections import deque
 
 import pygame
 
+import app_paths
+
 # ── Constantes globales ────────────────────────────────────────────────────────
 # Ces valeurs sont écrasées depuis menu.py selon la résolution choisie.
 LARGEUR = 1024
@@ -913,7 +915,7 @@ class Skybox:
 
     def _charger_images(self):
         try:
-            chemin_assets = os.path.join(os.path.dirname(__file__), "assets")
+            chemin_assets = os.path.join(app_paths.resource_dir(), "assets")
             
             # Mapping biome -> fichier image de niveau
             noms_images = {
@@ -936,7 +938,7 @@ class Skybox:
                 self.skybox0 = image_chargee.copy()
             else:
                 # Fallback sur les skybox par défaut si le fichier n'existe pas
-                chemin_base = os.path.join(os.path.dirname(__file__), "assets", "Skybox_0000")
+                chemin_base = os.path.join(app_paths.resource_dir(), "assets", "Skybox_0000")
                 chemin0 = os.path.join(chemin_base, "skybox0.png")
                 chemin1 = os.path.join(chemin_base, "Skybox1.png")
                 self.skybox0 = self._charger_et_redimensionner(chemin0)
@@ -1301,7 +1303,7 @@ class Joueur:
 
     def _charger_sprite(self):
         try:
-            dossier_courant = os.path.dirname(__file__)
+            dossier_courant = app_paths.resource_dir()
             anim = PERSONNAGE_ANIM[self.personnage]
             dossier_perso = os.path.join(dossier_courant, "assets", self.personnage)
             dossier_courir = os.path.join(dossier_perso, "Courir_animation")
@@ -2685,7 +2687,7 @@ class EcranFin:
         self.image_perdu = None
         if not self.victoire:
             try:
-                dossier_courant = os.path.dirname(__file__)
+                dossier_courant = app_paths.resource_dir()
                 chemin_lost = os.path.join(dossier_courant, "assets", "lost.png")
                 if os.path.exists(chemin_lost):
                     image = pygame.image.load(chemin_lost).convert_alpha()

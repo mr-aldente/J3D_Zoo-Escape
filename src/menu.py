@@ -30,6 +30,7 @@ import subprocess
 import socket as _socket
 import jeu
 import client_reseau as reseau
+import app_paths
 pygame.init()
 pygame.mixer.init()
 
@@ -49,7 +50,7 @@ GRIS = (100, 100, 100)
 # ── Persistance ────────────────────────────────────────────────────────────────
 # config.json est stocké dans le même dossier que ce script.
 # Il contient : largeur, hauteur, volume_musique, volume_sons, resolution_index.
-CONFIG_FILE = os.path.join(os.path.dirname(__file__), "config.json")
+CONFIG_FILE = app_paths.config_path()
 
 def charger_config():
     config_defaut = {
@@ -848,7 +849,7 @@ def _charger_apercu_personnage(dossier, hauteur_cible=72):
     if dossier in _PERSO_PREVIEW_CACHE:
         return _PERSO_PREVIEW_CACHE[dossier]
 
-    src_dir = os.path.join(os.path.dirname(__file__), "assets", dossier, "Courir_animation")
+    src_dir = os.path.join(app_paths.resource_dir(), "assets", dossier, "Courir_animation")
     if not os.path.isdir(src_dir):
         _PERSO_PREVIEW_CACHE[dossier] = None
         return None
@@ -1251,7 +1252,7 @@ def afficher_carte_monde(ecran, largeur, hauteur, difficulte: str, nb_joueurs=2,
     tick = 0
 
     # ── Chargement et mise à l'échelle pleine largeur ────────────────────────
-    chemin_carte = os.path.join(os.path.dirname(__file__), "..", "docs", "Map-overall.png")
+    chemin_carte = app_paths.map_overall_path()
     try:
         carte_img = pygame.image.load(chemin_carte).convert_alpha()
     except Exception as e:
@@ -1749,14 +1750,23 @@ def afficher_ecran_reseau(ecran, largeur, hauteur):
 
     def _lancer_serveur():
         nonlocal processus_serveur, message_erreur, erreur_timer
-        chemin_serveur = os.path.join(
-            os.path.dirname(__file__), "..", "server", "zoo_escape_server.py"
-        )
+        chemin_serveur = app_paths.server_script()
         try:
-            processus_serveur = subprocess.Popen(
-                [sys.executable, chemin_serveur],
-                creationflags=subprocess.CREATE_NEW_CONSOLE if sys.platform == "win32" else 0,
-            )
+            if app_paths.is_frozen():
+                bat = os.path.join(app_paths.install_dir(), "server", "LancerServeur.bat")
+                if not os.path.isfile(bat):
+                    message_erreur = "Serveur LAN non installe (composant optionnel)."
+                    erreur_timer = 240
+                    return False
+                processus_serveur = subprocess.Popen(
+                    ["cmd", "/c", "start", "", bat],
+                    cwd=os.path.dirname(bat),
+                )
+            else:
+                processus_serveur = subprocess.Popen(
+                    [sys.executable, chemin_serveur],
+                    creationflags=subprocess.CREATE_NEW_CONSOLE if sys.platform == "win32" else 0,
+                )
         except Exception as e:
             message_erreur = f"Erreur lancement serveur : {e}"
             erreur_timer = 240
@@ -2164,7 +2174,7 @@ def afficher_menu():
     """
     global ecran
     horloge = pygame.time.Clock()
-    dossier_courant = os.path.dirname(__file__)
+    dossier_courant = app_paths.resource_dir()
     
     charger_musique(dossier_courant)
     
