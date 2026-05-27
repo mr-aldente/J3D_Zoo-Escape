@@ -60,6 +60,7 @@ class GameServer:
         self.running = True
         self._beacon_running = False
         self._game_started = False
+        self._restart_votes: set[int] = set()
 
         print(f"[SERVEUR] Initialisation sur {host}:{port}")
 
@@ -205,6 +206,21 @@ class GameServer:
                     self.send_data(client_socket, {'type': 'heartbeat_ack'})
                     continue
 
+                elif msg_type == 'restart_request':
+                    if len(self.clients) < 2:
+                        continue
+                    self._restart_votes.add(player_id)
+                    self.broadcast({
+                        'type': 'restart_status',
+                        'votes': list(self._restart_votes),
+                    })
+                    if len(self._restart_votes) >= 2:
+                        self._restart_votes.clear()
+                        self.game_state.shared_health = 100
+                        seed = random.randint(0, 2**31)
+                        print(f"[SERVEUR] Rejouer — nouvelle partie. Seed={seed}")
+                        self.broadcast({'type': 'game_start', 'seed': seed})
+
         except Exception as e:
             print(f"[SERVEUR] Erreur avec joueur {player_id}: {e}")
         finally:
@@ -323,6 +339,7 @@ class GameServer:
             self._game_started = False
             self.lobby_level = None
             self.lobby_chars = {}
+            self._restart_votes.clear()
 
         # Notifie l'autre joueur si la partie est en cours
         if len(self.clients) > 0:

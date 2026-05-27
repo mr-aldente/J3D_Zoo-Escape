@@ -104,6 +104,9 @@ class ClientReseau:
         self._lock = threading.Lock()
         self._running = False
         self._heartbeat_tick = 0
+        self._restart_votes: set[int] = set()
+        self._restart_local = False
+        self._signal_redemarrage = False
 
     # ── Connexion ──────────────────────────────────────────────────────────────
 
@@ -162,11 +165,45 @@ class ClientReseau:
 
     def preparer_debut_partie(self) -> None:
         """Efface les vieux messages d'erreur reçus pendant les menus."""
+        self._restart_local = False
         with self._lock:
             if self._dernier_etat_jeu and self._dernier_etat_jeu.get('type') in (
                 'player_disconnected', 'server_shutdown', 'game_over',
             ):
                 self._dernier_etat_jeu = None
+            self._restart_votes = set()
+            self._signal_redemarrage = False
+
+    def demander_restart(self) -> bool:
+        """Demande un rejouer synchronisé (les deux joueurs doivent appuyer sur R)."""
+        if not self.connecte:
+            return False
+        self._restart_local = True
+        try:
+            self._envoyer({'type': 'restart_request'})
+            return True
+        except Exception as e:
+            print(f"[CLIENT] Erreur restart_request: {e}")
+            self.connecte = False
+            return False
+
+    def get_restart_status(self) -> tuple[bool, bool]:
+        """(j'ai demandé R, le partenaire a demandé R)."""
+        with self._lock:
+            votes = set(self._restart_votes)
+        if self.player_id is None:
+            return False, False
+        autre = 1 - self.player_id
+        moi = self._restart_local or self.player_id in votes
+        return moi, autre in votes
+
+    def verifier_redemarrage(self) -> bool:
+        """True une fois quand le serveur a relancé la partie (nouveau game_start)."""
+        with self._lock:
+            if self._signal_redemarrage:
+                self._signal_redemarrage = False
+                return True
+        return False
 
     def envoyer_etat_joueur(self, joueur) -> None:
         """
@@ -286,8 +323,21 @@ class ClientReseau:
 
             elif msg_type == 'game_start':
                 self.seed = data.get('seed')
-                self.game_start_recu = True
-                print(f"[CLIENT] Partie lancée ! Seed = {self.seed}")
+                if self.game_start_recu:
+                    with self._lock:
+                        self._signal_redemarrage = True
+                        self._restart_votes = set()
+                    self._restart_local = False
+                    print(f"[CLIENT] Rejouer ! Seed = {self.seed}")
+                else:
+                    self.game_start_recu = True
+                    print(f"[CLIENT] Partie lancée ! Seed = {self.seed}")
+
+            elif msg_type == 'restart_status':
+                votes = data.get('votes', [])
+                if isinstance(votes, list):
+                    with self._lock:
+                        self._restart_votes = {int(v) for v in votes}
 
             elif msg_type == 'lobby_state':
                 with self._lock:

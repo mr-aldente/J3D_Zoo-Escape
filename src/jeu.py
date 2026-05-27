@@ -3833,8 +3833,8 @@ def lancer_jeu(ecran, config_niveau=None, client_reseau=None, player_id=0, seed=
       get_nouveau_niveau : callable() → config_niveau | None  (pour la touche D)
 
     Touches en fin de partie :
-      R   = rejouer le même niveau (mode local/solo uniquement)
-      N   = niveau suivant (si existe)
+      R   = rejouer le même niveau (réseau : les deux joueurs appuient sur R)
+      N   = niveau suivant (si existe, local/solo)
       D   = choisir un autre niveau (via get_nouveau_niveau callback)
       ESC = retour au menu
     """
@@ -3845,6 +3845,7 @@ def lancer_jeu(ecran, config_niveau=None, client_reseau=None, player_id=0, seed=
                                seed=seed)
     flash_msg  = ""   # message temporaire affiché sur l'écran de fin
     flash_timer = 0   # durée restante en frames
+    reseau_restart_msg = ""
 
     while True:
         horloge.tick(FPS)
@@ -3856,51 +3857,81 @@ def lancer_jeu(ecran, config_niveau=None, client_reseau=None, player_id=0, seed=
                 if event.key == pygame.K_ESCAPE:
                     return True
 
-                if partie.termine and client_reseau is None:
+                if partie.termine:
                     fin = partie.ecran_fin
 
                     # R = rejouer le même niveau
                     if event.key == pygame.K_r:
-                        return lancer_jeu(ecran, config_niveau,
-                                          get_nouveau_niveau=get_nouveau_niveau)
-
-                    # Suite : Entrée, Espace ou N
-                    if partie.victoire and event.key in (
-                        pygame.K_RETURN, pygame.K_SPACE, pygame.K_n,
-                    ):
-                        if fin and fin.prochain:
-                            return lancer_jeu(
-                                ecran, _config_niveau_suivant(config_niveau, fin.prochain["numero"]),
-                                get_nouveau_niveau=get_nouveau_niveau,
-                            )
-                        if event.key == pygame.K_n:
-                            flash_msg = "Bientôt disponible !"
-                            flash_timer = 180
-
-                    if fin and event.key not in (
-                        pygame.K_RETURN, pygame.K_SPACE, pygame.K_n, pygame.K_r,
-                    ):
-                        fin.annuler_auto_continue()
-
-                    # D = choisir un autre niveau (via menu)
-                    if event.key == pygame.K_d and partie.victoire and get_nouveau_niveau:
-                        nouveau = get_nouveau_niveau()
-                        if nouveau is not None:
-                            nouveau = dict(nouveau)
-                            nouveau["ai_j2"]       = config_niveau.get("ai_j2",   False)
-                            nouveau["j2_force_ia"] = config_niveau.get("j2_force_ia", False)
-                            nouveau["solo_j1"]     = config_niveau.get("solo_j1", False)
-                            for cle in ("biome", "mode_boss", "boss_zone_pct", "boss_run_after"):
-                                if cle in config_niveau:
-                                    nouveau[cle] = config_niveau[cle]
-                            return lancer_jeu(ecran, nouveau,
+                        if client_reseau is None:
+                            return lancer_jeu(ecran, config_niveau,
                                               get_nouveau_niveau=get_nouveau_niveau)
+                        if client_reseau.demander_restart():
+                            moi, partenaire = client_reseau.get_restart_status()
+                            if partenaire:
+                                reseau_restart_msg = "Relance en cours..."
+                            else:
+                                reseau_restart_msg = "En attente du partenaire (R)..."
+
+                    if client_reseau is None:
+                        # Suite : Entrée, Espace ou N (local/solo)
+                        if partie.victoire and event.key in (
+                            pygame.K_RETURN, pygame.K_SPACE, pygame.K_n,
+                        ):
+                            if fin and fin.prochain:
+                                return lancer_jeu(
+                                    ecran, _config_niveau_suivant(config_niveau, fin.prochain["numero"]),
+                                    get_nouveau_niveau=get_nouveau_niveau,
+                                )
+                            if event.key == pygame.K_n:
+                                flash_msg = "Bientôt disponible !"
+                                flash_timer = 180
+
+                        if fin and event.key not in (
+                            pygame.K_RETURN, pygame.K_SPACE, pygame.K_n, pygame.K_r,
+                        ):
+                            fin.annuler_auto_continue()
+
+                        # D = choisir un autre niveau (via menu)
+                        if event.key == pygame.K_d and partie.victoire and get_nouveau_niveau:
+                            nouveau = get_nouveau_niveau()
+                            if nouveau is not None:
+                                nouveau = dict(nouveau)
+                                nouveau["ai_j2"]       = config_niveau.get("ai_j2",   False)
+                                nouveau["j2_force_ia"] = config_niveau.get("j2_force_ia", False)
+                                nouveau["solo_j1"]     = config_niveau.get("solo_j1", False)
+                                for cle in ("biome", "mode_boss", "boss_zone_pct", "boss_run_after"):
+                                    if cle in config_niveau:
+                                        nouveau[cle] = config_niveau[cle]
+                                return lancer_jeu(ecran, nouveau,
+                                                  get_nouveau_niveau=get_nouveau_niveau)
 
         if flash_timer > 0:
             flash_timer -= 1
 
         touches = pygame.key.get_pressed()
         partie.update(touches)
+
+        if client_reseau and partie.termine:
+            moi, partenaire = client_reseau.get_restart_status()
+            if moi and partenaire:
+                reseau_restart_msg = "Relance en cours..."
+            elif moi:
+                reseau_restart_msg = "En attente du partenaire (R)..."
+            elif partenaire:
+                reseau_restart_msg = "Partenaire prêt — appuyez sur R"
+            else:
+                reseau_restart_msg = ""
+
+        if (client_reseau and partie.termine
+                and client_reseau.verifier_redemarrage()):
+            client_reseau.preparer_debut_partie()
+            partie = JeuDeuxJoueurs(config_niveau,
+                                   client_reseau=client_reseau,
+                                   player_id=player_id,
+                                   seed=client_reseau.seed)
+            flash_msg = ""
+            flash_timer = 0
+            reseau_restart_msg = ""
 
         if (partie.termine and partie.victoire and partie.ecran_fin
                 and partie.ecran_fin.prochain and client_reseau is None):
@@ -3919,5 +3950,9 @@ def lancer_jeu(ecran, config_niveau=None, client_reseau=None, player_id=0, seed=
             surf = police(30).render(flash_msg, True, JAUNE)
             surf.set_alpha(alpha)
             ecran.blit(surf, surf.get_rect(center=(LARGEUR // 2, HAUTEUR // 2 + 190)))
+
+        if reseau_restart_msg:
+            surf_rs = police(24).render(reseau_restart_msg, True, JAUNE)
+            ecran.blit(surf_rs, surf_rs.get_rect(center=(LARGEUR // 2, HAUTEUR // 2 + 150)))
 
         pygame.display.flip()
