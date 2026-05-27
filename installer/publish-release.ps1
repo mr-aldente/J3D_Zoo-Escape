@@ -7,7 +7,7 @@ $Repo = "mr-aldente/J3D_Zoo-Escape"
 $Setup = Join-Path $PSScriptRoot "output\ZooEscape_Setup.exe"
 
 if (-not (Test-Path $Setup)) {
-    Write-Error "Fichier introuvable : $Setup — lancez build.cmd d'abord."
+    Write-Error "Fichier introuvable : $Setup - lancez build.cmd d abord."
 }
 
 gh auth status | Out-Null
