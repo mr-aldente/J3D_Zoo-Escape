@@ -24,7 +24,7 @@ if ($exists) {
 } else {
     Write-Host "Creation de la release $Version..."
     gh release create $Version --repo $Repo --title "Zoo Escape 1.0.6" `
-        --notes "Lobby reseau : l'hote choisit le niveau, chaque joueur choisit son personnage. Niveau boss et assets associes. Ne plus versionner __pycache__." `
+        --notes "Lobby reseau : l hote choisit le niveau, chaque joueur choisit son personnage. Niveau boss et assets associes. Ne plus versionner __pycache__." `
         $Setup
 }
 
