@@ -2,7 +2,7 @@
 # Prerequis : gh auth login
 
 $ErrorActionPreference = "Stop"
-$Version = "v1.0.7"
+$Version = "v1.0.8"
 $Repo = "mr-aldente/J3D_Zoo-Escape"
 $Setup = Join-Path $PSScriptRoot "output\ZooEscape_Setup.exe"
 
@@ -23,8 +23,8 @@ if ($exists) {
     gh release upload $Version $Setup --repo $Repo --clobber
 } else {
     Write-Host "Creation de la release $Version..."
-    gh release create $Version --repo $Repo --title "Zoo Escape 1.0.7" `
-        --notes "Mode reseau a 2 : relance synchronisee avec R sans repasser par le lobby. Les deux joueurs appuient sur R pour redemarrer la partie sur le meme niveau." `
+    gh release create $Version --repo $Repo --title "Zoo Escape 1.0.8" `
+        --notes "Fix release packaging: installer version synced to 1.0.8 and server __pycache__/.pyc excluded. Includes the network restart on R at end screen." `
         $Setup
 }
 

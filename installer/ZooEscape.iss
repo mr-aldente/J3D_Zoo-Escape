@@ -2,7 +2,7 @@
 ; Compiler avec Inno Setup 6+ : iscc installer\ZooEscape.iss
 
 #define MyAppName "Zoo Escape"
-#define MyAppVersion "1.0.3"
+#define MyAppVersion "1.0.8"
 #define MyAppPublisher "Zoo Escape — Projet J3D EPITA"
 #define MyAppURL "https://j3d-zoo-escape.onrender.com"
 #define MyAppExeName "ZooEscape.exe"
@@ -58,11 +58,11 @@ Source: "{#DistDir}\{#MyAppExeName}"; DestDir: "{app}"; Components: game; Flags:
 Source: "{#RepoRoot}\docs\*"; DestDir: "{app}\website"; Components: website; Flags: ignoreversion recursesubdirs createallsubdirs; Excludes: "downloads\ZooEscape_Setup.exe,downloads\ZooEscape_Setup_*.exe"
 ; Sources
 Source: "{#RepoRoot}\src\*"; DestDir: "{app}\sources\src"; Components: sources; Flags: ignoreversion recursesubdirs createallsubdirs; Excludes: "__pycache__\*,*.pyc,config.json"
-Source: "{#RepoRoot}\server\*"; DestDir: "{app}\sources\server"; Components: sources; Flags: ignoreversion recursesubdirs
+Source: "{#RepoRoot}\server\*"; DestDir: "{app}\sources\server"; Components: sources; Flags: ignoreversion recursesubdirs; Excludes: "__pycache__\*,*.pyc"
 Source: "{#RepoRoot}\requirements.txt"; DestDir: "{app}\sources"; Components: sources; Flags: ignoreversion
 Source: "{#RepoRoot}\tools\*"; DestDir: "{app}\sources\tools"; Components: sources; Flags: ignoreversion recursesubdirs skipifsourcedoesntexist
 ; Serveur LAN (optionnel)
-Source: "{#RepoRoot}\server\*"; DestDir: "{app}\server"; Components: server; Flags: ignoreversion recursesubdirs
+Source: "{#RepoRoot}\server\*"; DestDir: "{app}\server"; Components: server; Flags: ignoreversion recursesubdirs; Excludes: "__pycache__\*,*.pyc"
 Source: "{#RepoRoot}\requirements.txt"; DestDir: "{app}\server"; Components: server; Flags: ignoreversion
 Source: "server\LancerServeur.bat"; DestDir: "{app}\server"; Components: server; Flags: ignoreversion
 ; Manuels
